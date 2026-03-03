@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dos Nibbles</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Dos Nibbles Clone</h1>
+
+    <!-- settings overlay -->
+    <div id="settings">
+        <label>Mode:
+            <select id="mode">
+                <option value="single">Single player</option>
+                <option value="double" selected>Two player</option>
+            </select>
+        </label><br>
+        <label>Player 1 name: <input type="text" id="p1name" value="sammy"></label><br>
+        <label>Player 2 name: <input type="text" id="p2name" value="jake"></label><br>
+        <label>Speed (1-100): <input type="number" id="speed" min="1" max="100" value="50"></label><br>
+        <button id="startBtn">Start Game</button>
+    </div>
+
+    <div id="info" style="display:none;">
+        <span id="scoreDisplay"></span> | <span id="livesDisplay"></span>
+    </div>
+
+    <canvas id="gameCanvas" width="600" height="600" style="display:none;"></canvas>
+    <script src="script.js"></script>
+</body>
+</html>

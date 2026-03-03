@@ -1,0 +1,28 @@
+body {
+    font-family: sans-serif;
+    background: #88c; /* lighter blue background */
+    color: #000;
+    text-align: center;
+}
+
+canvas {
+    border: 2px solid #f00;
+    background: #afe; /* light nibbles-like */
+    margin-top: 20px;
+    width: 600px;
+    height: 600px;
+}
+
+#settings {
+    margin-top: 20px;
+}
+
+#settings input[type="text"],
+#settings input[type="number"] {
+    width: 100px;
+    margin: 4px;
+}
+
+#info {
+    margin-top: 10px;
+}
