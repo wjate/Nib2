@@ -1,16 +1,31 @@
 body {
     font-family: sans-serif;
-    background: #88c; /* lighter blue background */
+    background: #fff; /* white background */
     color: #000;
     text-align: center;
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
 }
 
 canvas {
     border: 2px solid #f00;
     background: #afe; /* light nibbles-like */
     margin-top: 20px;
-    width: 600px;
-    height: 600px;
+    /* responsive and fills available space */
+    width: 100%;
+    height: calc(100vh - 150px);
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+}
+
+#gameCanvas {
+    width: calc(100vh - 150px);
+    height: calc(100vh - 150px);
+    max-width: calc(100vw - 20px);
 }
 
 #settings {
@@ -25,4 +40,31 @@ canvas {
 
 #info {
     margin-top: 10px;
+}
+
+#endBtn {
+    margin-left: 10px;
+    padding: 4px 8px;
+    font-size: 0.9em;
+}
+
+#levelEditor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: #fff;
+}
+
+#editorCanvas {
+    max-width: 80vmin;
+    max-height: 80vmin;
+}
 }

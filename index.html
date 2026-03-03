@@ -20,14 +20,40 @@
         <label>Player 1 name: <input type="text" id="p1name" value="sammy"></label><br>
         <label>Player 2 name: <input type="text" id="p2name" value="jake"></label><br>
         <label>Speed (1-100): <input type="number" id="speed" min="1" max="100" value="50"></label><br>
+        <label>Level:
+            <select id="levelSelect">
+                <option value="0">Level 1 (default)</option>
+            </select>
+        </label><br>
+        <button id="levelEditorBtn">Level Editor</button>
         <button id="startBtn">Start Game</button>
     </div>
 
     <div id="info" style="display:none;">
-        <span id="scoreDisplay"></span> | <span id="livesDisplay"></span>
+        <span id="levelDisplay"></span> | <span id="scoreDisplay"></span> | <span id="livesDisplay"></span>
+        <button id="endBtn">End Game</button>
     </div>
 
-    <canvas id="gameCanvas" width="600" height="600" style="display:none;"></canvas>
+    <!-- level editor overlay -->
+    <div id="levelEditor" style="display:none;">
+        <h2>Level Editor</h2>
+        <div id="editorControls">
+            <label>Tool:
+                <select id="editorTool">
+                    <option value="dot">Dot</option>
+                    <option value="line">Line (2 points)</option>
+                    <option value="curve">Curve (3+ points)</option>
+                </select>
+            </label>
+            <button id="editorClear">Clear</button>
+            <button id="editorSave">Save Level</button>
+            <button id="editorCancel">Cancel</button>
+        </div>
+        <canvas id="editorCanvas" style="border: 1px solid #000; display: block; margin: 10px auto;"></canvas>
+        <p id="editorHint">Click to place walls. Right-click or press ESC to cancel.</p>
+    </div>
+
+    <canvas id="gameCanvas" style="display:none;"></canvas>
     <script src="script.js"></script>
 </body>
 </html>
