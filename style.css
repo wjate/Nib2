@@ -68,3 +68,16 @@ canvas {
     height: auto !important;
     image-rendering: pixelated;
 }
+
+#editorControls,
+#editorMeta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+#editorMeta input[type="number"] {
+    width: 72px;
+}

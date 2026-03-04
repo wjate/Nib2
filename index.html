@@ -55,6 +55,12 @@
             <button id="editorSave">Save Level</button>
             <button id="editorCancel">Cancel</button>
         </div>
+        <div id="editorMeta">
+            <span id="editorCoordDisplay">X: -, Y: -</span>
+            <label>X: <input type="number" id="dotXInput" min="1"></label>
+            <label>Y: <input type="number" id="dotYInput" min="1"></label>
+            <button id="addDotBtn">Add Dot (X,Y)</button>
+        </div>
         <canvas id="editorCanvas" style="border: 1px solid #000; display: block; margin: 10px auto;"></canvas>
         <p id="editorHint">Select a tool or start button, then click on the grid to place walls or starting positions. Right-click or press ESC to cancel current action.</p>
     </div>

@@ -10,15 +10,21 @@ const grid = 4;
 const columns = 100;
 const rows = 50;
 
-// derived canvas pixel dimensions - scale to fill viewport
-let canvasWidth = window.innerWidth;
-let canvasHeight = window.innerHeight;
+// derived canvas pixel dimensions for the playable field
+let canvasWidth = 0;
+let canvasHeight = 0;
+let actualGrid = 1;
 
-canvas.width = canvasWidth;
-canvas.height = canvasHeight;
+function updateCanvasMetrics() {
+    // Keep a consistent logical field (columns x rows) and scale to viewport.
+    actualGrid = Math.max(1, Math.floor(Math.min(window.innerWidth / columns, window.innerHeight / rows)));
+    canvasWidth = columns * actualGrid;
+    canvasHeight = rows * actualGrid;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+}
 
-// Calculate actual grid size based on screen dimensions
-const actualGrid = Math.floor(Math.min(canvasWidth / columns, canvasHeight / rows));
+updateCanvasMetrics();
 
 let players = [];
 let currentNumber = 1;
@@ -47,6 +53,10 @@ const editorCommit = document.getElementById('editorCommit');
 const editorClear = document.getElementById('editorClear');
 const editorSave = document.getElementById('editorSave');
 const editorCancel = document.getElementById('editorCancel');
+const editorCoordDisplay = document.getElementById('editorCoordDisplay');
+const dotXInput = document.getElementById('dotXInput');
+const dotYInput = document.getElementById('dotYInput');
+const addDotBtn = document.getElementById('addDotBtn');
 
 // Level storage
 let levels = loadLevels();
@@ -112,16 +122,16 @@ function ensureLevelIndex(idx) {
     }
 }
 
-// ask user for a 1-based level number; returns 0-based index or null if cancelled
+// ask user for a 1-based level number (2+); returns 0-based index or null if cancelled
 function promptForLevelIndex() {
     while (true) {
-        const raw = prompt('Enter level number (1+):', selectedLevelIdx + 1);
+        const raw = prompt('Enter level number (2+):', Math.max(2, selectedLevelIdx + 1));
         if (raw === null) return null;
         const num = parseInt(raw, 10);
-        if (!isNaN(num) && num >= 1) {
+        if (!isNaN(num) && num >= 2) {
             return num - 1;
         }
-        alert('Please enter a valid integer 1 or greater.');
+        alert('Please enter a valid integer 2 or greater.');
     }
 }
 
@@ -189,6 +199,7 @@ function makePlayer(name, idx, startInfo) {
         body: body,
         dx: start.dx ?? defaultDx,
         dy: start.dy ?? defaultDy,
+        queuedDirection: null,
         lives: 5,
         score: 0,
         targetLength: 3, // desired body length in segments (start visible)
@@ -214,18 +225,29 @@ function randomNumberPosition() {
     while (attempts < 100) {
         position = {
             x: Math.floor(Math.random() * columns) * grid,
-            y: Math.floor(Math.random() * rows) * grid
+            // keep one cell below available because the number tile is 2 cells tall
+            y: Math.floor(Math.random() * Math.max(1, rows - 1)) * grid
         };
         let bad = false;
         // check collision with snakes
         players.forEach(p => {
             p.body.forEach(seg => {
-                if (seg.x === position.x && seg.y === position.y) bad = true;
+                if (
+                    (seg.x === position.x && seg.y === position.y) ||
+                    (seg.x === position.x && seg.y === position.y + grid)
+                ) {
+                    bad = true;
+                }
             });
         });
         // check collision with walls
         walls.forEach(wall => {
-            if (wall.x === position.x && wall.y === position.y) bad = true;
+            if (
+                (wall.x === position.x && wall.y === position.y) ||
+                (wall.x === position.x && wall.y === position.y + grid)
+            ) {
+                bad = true;
+            }
         });
         if (!bad) return position;
         attempts++;
@@ -249,13 +271,15 @@ function draw() {
     });
 
     // number tile (2 cells tall)
+    const nx = (numberPos.x / grid) * actualGrid;
+    const ny = (numberPos.y / grid) * actualGrid;
     ctx.fillStyle = '#fff';
-    ctx.fillRect(numberPos.x, numberPos.y, actualGrid, actualGrid * 2);
+    ctx.fillRect(nx, ny, actualGrid, actualGrid * 2);
     ctx.fillStyle = '#000';
     ctx.font = Math.floor(actualGrid * 1.5) + 'px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(currentNumber, numberPos.x + actualGrid/2, numberPos.y + actualGrid);
+    ctx.fillText(currentNumber, nx + actualGrid / 2, ny + actualGrid);
 
     // players (draw as rounded polyline rather than individual squares)
     players.forEach(p => {
@@ -278,14 +302,29 @@ function update() {
     let collisionOccurred = false;
     players.forEach(p => {
         if (collisionOccurred) return;
+
+        // Apply at most one queued turn per tick to avoid instant double-turn self collisions.
+        if (p.queuedDirection) {
+            const nextDx = p.queuedDirection.dx;
+            const nextDy = p.queuedDirection.dy;
+            if (!(nextDx === -p.dx && nextDy === -p.dy)) {
+                p.dx = nextDx;
+                p.dy = nextDy;
+            }
+            p.queuedDirection = null;
+        }
+
         const head = {x: p.body[0].x + p.dx, y: p.body[0].y + p.dy};
 
-        // wall collision
-        if (head.x < 0 || head.x >= canvas.width || head.y < 0 || head.y >= canvas.height) {
-            die(p);
-            collisionOccurred = true;
-            return;
-        }
+    // wall collision
+    const maxX = columns * grid;
+    const maxY = rows * grid;
+
+    if (head.x < 0 || head.x >= maxX || head.y < 0 || head.y >= maxY) {
+        die(p);
+        collisionOccurred = true;
+        return;
+    }
 
         // wall obstacle collision
         walls.forEach(wall => {
@@ -318,8 +357,9 @@ function update() {
         });
         if (collisionOccurred) return;
 
-        // eat number
-        if (head.x === numberPos.x && head.y === numberPos.y) {
+        // eat number (number tile is 2 cells tall)
+        if ((head.x === numberPos.x && head.y === numberPos.y) || 
+            (head.x === numberPos.x && head.y === numberPos.y + grid)) {
             p.score += currentNumber * 100;
             const growthAmount = currentNumber * 2;
             p.targetLength += growthAmount;
@@ -372,6 +412,7 @@ function die(player) {
             p.body = body;
             p.dx = startDx;
             p.dy = startDy;
+            p.queuedDirection = null;
             p.targetLength = 3;
         });
         // Reset food position
@@ -399,6 +440,7 @@ function die(player) {
         player.body = body;
         player.dx = startDx;
         player.dy = startDy;
+        player.queuedDirection = null;
         player.targetLength = 3;
     }
 }
@@ -424,14 +466,25 @@ function updateInfo() {
 function changeDirection(event) {
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
     players.forEach(p => {
-        if (key === p.controls.left && p.dx === 0) {
-            p.dx = -grid; p.dy = 0;
-        } else if (key === p.controls.right && p.dx === 0) {
-            p.dx = grid; p.dy = 0;
-        } else if (key === p.controls.up && p.dy === 0) {
-            p.dx = 0; p.dy = -grid;
-        } else if (key === p.controls.down && p.dy === 0) {
-            p.dx = 0; p.dy = grid;
+        if (p.queuedDirection) return;
+
+        let nextDx = null;
+        let nextDy = null;
+        if (key === p.controls.left) {
+            nextDx = -grid; nextDy = 0;
+        } else if (key === p.controls.right) {
+            nextDx = grid; nextDy = 0;
+        } else if (key === p.controls.up) {
+            nextDx = 0; nextDy = -grid;
+        } else if (key === p.controls.down) {
+            nextDx = 0; nextDy = grid;
+        }
+
+        if (nextDx === null) return;
+        if (nextDx === -p.dx && nextDy === -p.dy) return;
+
+        if (!(nextDx === p.dx && nextDy === p.dy)) {
+            p.queuedDirection = {dx: nextDx, dy: nextDy};
         }
     });
 }
@@ -525,15 +578,21 @@ function initEditor() {
     const hint = document.getElementById('editorHint');
     hint.textContent = 'Select a tool or start button, then click on the grid to place walls or starting positions. Right-click or press ESC to cancel current action.';
     editorTool_points = [];
+    editorCoordDisplay.textContent = 'X: -, Y: -';
+    dotXInput.value = '';
+    dotYInput.value = '';
+    dotXInput.min = 1;
+    dotXInput.max = columns;
+    dotYInput.min = 1;
+    dotYInput.max = rows;
+    updateEditorCommitState();
     drawEditor();
 }
 
 function drawEditor() {
     const w = editorCanvas.width;
     const h = editorCanvas.height;
-    const cols = columns; // number of columns in game field
-    const baseEditorGrid = w / cols;
-    const editorGrid = baseEditorGrid * 2.5; // increase grid scale for visibility
+    const editorGrid = w / columns;  // exact logical grid
     
     editorCtx.fillStyle = '#fff';
     editorCtx.fillRect(0, 0, w, h);
@@ -541,7 +600,7 @@ function drawEditor() {
     // draw grid
     editorCtx.strokeStyle = '#ddd';
     editorCtx.lineWidth = 1;
-    for (let i = 0; i <= cols; i++) {
+    for (let i = 0; i <= columns; i++) {
         const x = i * editorGrid;
         if (x <= w) {
             editorCtx.beginPath();
@@ -583,35 +642,35 @@ function drawEditor() {
             editorCtx.arc(cx, cy, editorGrid / 3, 0, 2 * Math.PI);
             editorCtx.fill();
             
-            // draw directional arrow
-            editorCtx.strokeStyle = '#000';
+            // draw a larger directional arrow (more prominent for P1/P2 starts)
+            let ux = 0, uy = 0;
+            if (st.dx > 0) ux = 1;
+            else if (st.dx < 0) ux = -1;
+            else if (st.dy > 0) uy = 1;
+            else if (st.dy < 0) uy = -1;
+            const px = -uy;
+            const py = ux;
+            const shaftBack = editorGrid * 0.14;
+            const shaftFront = editorGrid * 0.36;
+            const headLen = editorGrid * 0.26;
+            const bodyHalf = editorGrid * 0.10;
+            const headHalf = editorGrid * 0.20;
+            const bx = cx - ux * shaftBack;
+            const by = cy - uy * shaftBack;
+            const tx = cx + ux * shaftFront;
+            const ty = cy + uy * shaftFront;
+            const tipX = tx + ux * headLen;
+            const tipY = ty + uy * headLen;
+
             editorCtx.fillStyle = '#000';
-            editorCtx.lineWidth = 2;
-            editorCtx.lineCap = 'round';
-            editorCtx.lineJoin = 'round';
-            
-            const arrowLen = editorGrid / 3;
-            let arrowX = 0, arrowY = 0;
-            if (st.dx > 0) arrowX = arrowLen;         // right
-            else if (st.dx < 0) arrowX = -arrowLen;   // left
-            else if (st.dy > 0) arrowY = arrowLen;    // down
-            else if (st.dy < 0) arrowY = -arrowLen;   // up
-            
-            // draw arrow shaft
             editorCtx.beginPath();
-            editorCtx.moveTo(cx, cy);
-            editorCtx.lineTo(cx + arrowX, cy + arrowY);
-            editorCtx.stroke();
-            
-            // draw arrow head
-            const headSize = arrowLen * 0.4;
-            const angle = Math.atan2(arrowY, arrowX);
-            const tipX = cx + arrowX;
-            const tipY = cy + arrowY;
-            editorCtx.beginPath();
-            editorCtx.moveTo(tipX, tipY);
-            editorCtx.lineTo(tipX - headSize * Math.cos(angle - Math.PI / 6), tipY - headSize * Math.sin(angle - Math.PI / 6));
-            editorCtx.lineTo(tipX - headSize * Math.cos(angle + Math.PI / 6), tipY - headSize * Math.sin(angle + Math.PI / 6));
+            editorCtx.moveTo(bx + px * bodyHalf, by + py * bodyHalf);
+            editorCtx.lineTo(tx + px * bodyHalf, ty + py * bodyHalf);
+            editorCtx.lineTo(tx + px * headHalf, ty + py * headHalf);
+            editorCtx.lineTo(tipX, tipY);
+            editorCtx.lineTo(tx - px * headHalf, ty - py * headHalf);
+            editorCtx.lineTo(tx - px * bodyHalf, ty - py * bodyHalf);
+            editorCtx.lineTo(bx - px * bodyHalf, by - py * bodyHalf);
             editorCtx.closePath();
             editorCtx.fill();
             
@@ -652,17 +711,108 @@ function drawEditor() {
 
 let editorMouseGridPos = null;
 
+function updateEditorCoordDisplay(gridCol, gridRow) {
+    if (gridCol === null || gridRow === null) {
+        editorCoordDisplay.textContent = 'X: -, Y: -';
+        return;
+    }
+    editorCoordDisplay.textContent = `X: ${gridCol + 1}, Y: ${gridRow + 1}`;
+}
+
+function updateEditorCommitState() {
+    const tool = editorTool.value;
+    const isCommitTool = tool === 'line' || tool === 'curve';
+    if (!isCommitTool) {
+        editorCommit.style.display = 'none';
+        editorCommit.disabled = true;
+        return;
+    }
+    editorCommit.style.display = 'inline-block';
+    if (tool === 'line') {
+        editorCommit.disabled = editorTool_points.length < 2;
+    } else {
+        editorCommit.disabled = editorTool_points.length < 3;
+    }
+}
+
+function getLineCells(points) {
+    const cells = [];
+    if (points.length < 2) return cells;
+    for (let seg = 0; seg < points.length - 1; seg++) {
+        const p1 = points[seg];
+        const p2 = points[seg + 1];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const steps = Math.max(Math.abs(dx), Math.abs(dy)) / grid;
+        if (steps === 0) {
+            cells.push({x: p1.x, y: p1.y});
+            continue;
+        }
+        for (let i = 0; i <= steps; i++) {
+            const px = p1.x + (dx / steps) * i;
+            const py = p1.y + (dy / steps) * i;
+            cells.push({
+                x: Math.round(px / grid) * grid,
+                y: Math.round(py / grid) * grid
+            });
+        }
+    }
+    return cells;
+}
+
+function getCurveCells(points) {
+    const cells = [];
+    if (points.length < 3) return cells;
+    for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[Math.max(0, i - 1)];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = points[Math.min(points.length - 1, i + 2)];
+        for (let t = 0; t <= 1; t += 0.05) {
+            const t2 = t * t;
+            const t3 = t2 * t;
+            const x = 0.5 * (
+                2 * p1.x + (-p0.x + p2.x) * t +
+                (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+                (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
+            );
+            const y = 0.5 * (
+                2 * p1.y + (-p0.y + p2.y) * t +
+                (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+                (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
+            );
+            cells.push({
+                x: Math.round(x / grid) * grid,
+                y: Math.round(y / grid) * grid
+            });
+        }
+    }
+    return cells;
+}
+
+function addWallCells(cells) {
+    cells.forEach(c => {
+        if (!editorWalls.find(w => w.x === c.x && w.y === c.y)) {
+            editorWalls.push({x: c.x, y: c.y});
+        }
+    });
+}
+
 editorCanvas.addEventListener('mousemove', (e) => {
     const rect = editorCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const editorGrid = editorCanvas.width / columns;
-    const gridCol = Math.floor(x / editorGrid);
-    const gridRow = Math.floor(y / editorGrid);
+    // Use rendered dimensions for pointer-to-cell mapping so preview stays under cursor.
+    const cellWidth = rect.width / columns;
+    const cellHeight = rect.height / rows;
+    const gridCol = Math.floor(x / cellWidth);
+    const gridRow = Math.floor(y / cellHeight);
     if (gridCol < 0 || gridCol >= columns || gridRow < 0 || gridRow >= rows) {
         editorMouseGridPos = null;
+        updateEditorCoordDisplay(null, null);
     } else {
         editorMouseGridPos = {col: gridCol, row: gridRow};
+        updateEditorCoordDisplay(gridCol, gridRow);
     }
     // redraw with preview
     redrawEditorWithPreview();
@@ -670,6 +820,7 @@ editorCanvas.addEventListener('mousemove', (e) => {
 
 editorCanvas.addEventListener('mouseleave', () => {
     editorMouseGridPos = null;
+    updateEditorCoordDisplay(null, null);
     drawEditor();
 });
 
@@ -686,26 +837,17 @@ function redrawEditorWithPreview() {
     editorCtx.fillStyle = 'rgba(100, 100, 100, 0.4)';
     editorCtx.fillRect(px, py, editorGrid - 1, editorGrid - 1);
     
-    // For line and curve tools, show preview line from last point to current position
+    // For line and curve tools, show a shadow of the walls that commit will place.
     const tool = editorTool.value;
-    if ((tool === 'line' || tool === 'curve') && editorTool_points.length > 0) {
-        const lastPt = editorTool_points[editorTool_points.length - 1];
-        const lastPx = (lastPt.x / grid) * editorGrid;
-        const lastPy = (lastPt.y / grid) * editorGrid;
-        
-        editorCtx.strokeStyle = 'rgba(100, 200, 100, 0.6)';
-        editorCtx.lineWidth = 2;
-        editorCtx.beginPath();
-        editorCtx.moveTo(lastPx + editorGrid / 2, lastPy + editorGrid / 2);
-        editorCtx.lineTo(px + editorGrid / 2, py + editorGrid / 2);
-        editorCtx.stroke();
-        
-        // Draw all points collected so far as red dots
-        editorCtx.fillStyle = '#f00';
-        editorTool_points.forEach(pt => {
-            const ptPx = (pt.x / grid) * editorGrid;
-            const ptPy = (pt.y / grid) * editorGrid;
-            editorCtx.fillRect(ptPx + editorGrid / 4, ptPy + editorGrid / 4, editorGrid / 2, editorGrid / 2);
+    if (tool === 'line' || tool === 'curve') {
+        const tempPoint = {x: editorMouseGridPos.col * grid, y: editorMouseGridPos.row * grid};
+        const previewPoints = editorTool_points.concat([tempPoint]);
+        const previewCells = tool === 'line' ? getLineCells(previewPoints) : getCurveCells(previewPoints);
+        editorCtx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+        previewCells.forEach(c => {
+            const cx = (c.x / grid) * editorGrid;
+            const cy = (c.y / grid) * editorGrid;
+            editorCtx.fillRect(cx, cy, editorGrid - 1, editorGrid - 1);
         });
     }
 }
@@ -713,58 +855,20 @@ function redrawEditorWithPreview() {
 // Apply walls for line tool (called when commit is clicked)
 function applyLineWalls() {
     if (editorTool_points.length >= 2) {
-        // Connect all consecutive points with lines
-        for (let seg = 0; seg < editorTool_points.length - 1; seg++) {
-            const p1 = editorTool_points[seg];
-            const p2 = editorTool_points[seg + 1];
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
-            const steps = Math.max(Math.abs(dx), Math.abs(dy)) / grid;
-            for (let i = 0; i <= steps; i++) {
-                const px = p1.x + (dx / steps) * i;
-                const py = p1.y + (dy / steps) * i;
-                const rounded = {x: Math.round(px / grid) * grid, y: Math.round(py / grid) * grid};
-                const idx = editorWalls.findIndex(w => w.x === rounded.x && w.y === rounded.y);
-                if (idx < 0) editorWalls.push(rounded);
-            }
-        }
+        addWallCells(getLineCells(editorTool_points));
         editorTool_points = [];
+        updateEditorCommitState();
         drawEditor();
-        editorCommit.style.display = 'none';
     }
 }
 
 // Apply walls for curve tool (called when commit is clicked)
 function applyCurveWalls() {
     if (editorTool_points.length >= 3) {
-        const pts = editorTool_points;
-        for (let i = 0; i < pts.length - 1; i++) {
-            const p0 = pts[Math.max(0, i - 1)];
-            const p1 = pts[i];
-            const p2 = pts[i + 1];
-            const p3 = pts[Math.min(pts.length - 1, i + 2)];
-            
-                for (let t = 0; t <= 1; t += 0.05) {
-                const t2 = t * t;
-                const t3 = t2 * t;
-                const x = 0.5 * (
-                    2 * p1.x + (-p0.x + p2.x) * t +
-                    (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-                    (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
-                );
-                const y = 0.5 * (
-                    2 * p1.y + (-p0.y + p2.y) * t +
-                    (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-                    (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
-                );
-                const rounded = {x: Math.round(x / grid) * grid, y: Math.round(y / grid) * grid};
-                const idx = editorWalls.findIndex(w => w.x === rounded.x && w.y === rounded.y);
-                if (idx < 0) editorWalls.push(rounded);
-            }
-        }
+        addWallCells(getCurveCells(editorTool_points));
         editorTool_points = [];
+        updateEditorCommitState();
         drawEditor();
-        editorCommit.style.display = 'none';
     }
 }
 
@@ -772,11 +876,15 @@ editorCanvas.addEventListener('click', (e) => {
     const rect = editorCanvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const w = editorCanvas.width;
-    const baseEditorGrid = w / columns;
-    const editorGrid = baseEditorGrid * 2.5; // match the scale in drawEditor
-    const gridCol = Math.floor(x / editorGrid);
-    const gridRow = Math.floor(y / editorGrid);
+    
+    // Calculate grid position based on rendered canvas size
+    const renderedWidth = rect.width;
+    const renderedHeight = rect.height;
+    const cellWidth = renderedWidth / columns;
+    const cellHeight = renderedHeight / rows;
+    
+    const gridCol = Math.floor(x / cellWidth);
+    const gridRow = Math.floor(y / cellHeight);
     
     // Ensure we're within valid grid bounds (columns x rows)
     if (gridCol < 0 || gridCol >= columns || gridRow < 0 || gridRow >= rows) {
@@ -813,22 +921,11 @@ editorCanvas.addEventListener('click', (e) => {
         }
         drawEditor();
     } else if (tool === 'line') {
-        editorTool_points.push({x: gridX, y: gridY});
-        if (editorTool_points.length >= 2) {
-            // Apply walls for this segment and keep the last point for next segment
-            const p1 = editorTool_points[editorTool_points.length - 2];
-            const p2 = editorTool_points[editorTool_points.length - 1];
-            const dx = p2.x - p1.x;
-            const dy = p2.y - p1.y;
-            const steps = Math.max(Math.abs(dx), Math.abs(dy)) / grid;
-            for (let i = 0; i <= steps; i++) {
-                const px = p1.x + (dx / steps) * i;
-                const py = p1.y + (dy / steps) * i;
-                const rounded = {x: Math.round(px / grid) * grid, y: Math.round(py / grid) * grid};
-                const idx = editorWalls.findIndex(w => w.x === rounded.x && w.y === rounded.y);
-                if (idx < 0) editorWalls.push(rounded);
-            }
+        const last = editorTool_points[editorTool_points.length - 1];
+        if (!last || last.x !== gridX || last.y !== gridY) {
+            editorTool_points.push({x: gridX, y: gridY});
         }
+        updateEditorCommitState();
         redrawEditorWithPreview();
     } else if (tool === 'erase') {
         // Erase in a 3x3 area for easier bulk removal
@@ -845,36 +942,11 @@ editorCanvas.addEventListener('click', (e) => {
         }
         drawEditor();
     } else if (tool === 'curve') {
-        editorTool_points.push({x: gridX, y: gridY});
-        if (editorTool_points.length >= 3) {
-            // Apply curve walls for segments and keep last point
-            const pts = editorTool_points;
-            // Process all segments up to the second-to-last point
-            for (let i = 0; i < pts.length - 2; i++) {
-                const p0 = pts[Math.max(0, i - 1)];
-                const p1 = pts[i];
-                const p2 = pts[i + 1];
-                const p3 = pts[Math.min(pts.length - 1, i + 2)];
-                
-                for (let t = 0; t <= 1; t += 0.05) {
-                    const t2 = t * t;
-                    const t3 = t2 * t;
-                    const x = 0.5 * (
-                        2 * p1.x + (-p0.x + p2.x) * t +
-                        (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
-                        (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
-                    );
-                    const y = 0.5 * (
-                        2 * p1.y + (-p0.y + p2.y) * t +
-                        (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
-                        (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
-                    );
-                    const rounded = {x: Math.round(x / grid) * grid, y: Math.round(y / grid) * grid};
-                    const idx = editorWalls.findIndex(w => w.x === rounded.x && w.y === rounded.y);
-                    if (idx < 0) editorWalls.push(rounded);
-                }
-            }
+        const last = editorTool_points[editorTool_points.length - 1];
+        if (!last || last.x !== gridX || last.y !== gridY) {
+            editorTool_points.push({x: gridX, y: gridY});
         }
+        updateEditorCommitState();
         redrawEditorWithPreview();
     } else if (tool === 'circle') {
         editorTool_points.push({x: gridX, y: gridY});
@@ -904,13 +976,13 @@ editorCanvas.addEventListener('click', (e) => {
 editorCanvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     editorTool_points = [];
-    editorCommit.style.display = 'none';
+    updateEditorCommitState();
     drawEditor();
 });
 
 editorTool.addEventListener('change', () => {
     editorTool_points = [];
-    editorCommit.style.display = 'none';
+    updateEditorCommitState();
     drawEditor();
 });
 
@@ -918,7 +990,7 @@ editorClear.addEventListener('click', () => {
     editorWalls = [];
     editorTool_points = [];
     editorStarts = [null, null];
-    editorCommit.style.display = 'none';
+    updateEditorCommitState();
     drawEditor();
 });
 
@@ -935,13 +1007,27 @@ editorCommit.addEventListener('click', () => {
 document.getElementById('setStart1').addEventListener('click', () => {
     settingStart = {player: 1};
     editorTool_points = [];
-    editorCommit.style.display = 'none';
+    updateEditorCommitState();
     drawEditor();
 });
 document.getElementById('setStart2').addEventListener('click', () => {
     settingStart = {player: 2};
     editorTool_points = [];
-    editorCommit.style.display = 'none';
+    updateEditorCommitState();
+    drawEditor();
+});
+
+addDotBtn.addEventListener('click', () => {
+    const x = parseInt(dotXInput.value, 10);
+    const y = parseInt(dotYInput.value, 10);
+    if (isNaN(x) || isNaN(y) || x < 1 || x > columns || y < 1 || y > rows) {
+        alert(`Enter valid coordinates: X 1-${columns}, Y 1-${rows}.`);
+        return;
+    }
+    const wall = {x: (x - 1) * grid, y: (y - 1) * grid};
+    if (!editorWalls.find(w => w.x === wall.x && w.y === wall.y)) {
+        editorWalls.push(wall);
+    }
     drawEditor();
 });
 
@@ -1008,7 +1094,8 @@ levelSelect.value = selectedLevelIdx;
 
 // Handle window resize
 window.addEventListener('resize', () => {
-    // playing field fixed size; ignore resize
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
+    updateCanvasMetrics();
+    if (canvas.style.display !== 'none') {
+        draw();
+    }
 });
