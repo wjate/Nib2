@@ -6,18 +6,48 @@ const ctx = canvas.getContext('2d');
 // rendering and internal location, snake movement is now more fluid.
 const grid = 4;
 
-// fixed playing field dimensions in dots (wider than tall as requested)
-const columns = 100;
-const rows = 50;
+// fixed playing field dimensions in dots
+const LOCAL_COLUMNS = 100;
+const LOCAL_ROWS = 50;
+const ONLINE_COLUMNS = 220;
+const ONLINE_ROWS = 120;
+let columns = LOCAL_COLUMNS;
+let rows = LOCAL_ROWS;
 
 // derived canvas pixel dimensions for the playable field
 let canvasWidth = 0;
 let canvasHeight = 0;
 let actualGrid = 1;
 
+const VIEWPORT_PADDING = 8;
+
+function setArenaForMode(modeName) {
+    if (modeName === 'online') {
+        columns = ONLINE_COLUMNS;
+        rows = ONLINE_ROWS;
+    } else {
+        columns = LOCAL_COLUMNS;
+        rows = LOCAL_ROWS;
+    }
+}
+
 function updateCanvasMetrics() {
-    // Keep a consistent logical field (columns x rows) and scale to viewport.
-    actualGrid = Math.max(1, Math.floor(Math.min(window.innerWidth / columns, window.innerHeight / rows)));
+    // Keep canvas fully inside the visible viewport, accounting for chrome bars.
+    const appShellEl = document.getElementById('appShell');
+    const infoEl = document.getElementById('info');
+    const scoreboardEl = document.getElementById('scoreboardPanel');
+    const menuBarEl = document.getElementById('menuBar');
+    const menuHeight = appShellEl && appShellEl.style.display !== 'none' ? (menuBarEl?.offsetHeight || 0) : 0;
+    const infoHeight = infoEl && infoEl.style.display !== 'none' ? infoEl.offsetHeight : 0;
+    const scoreboardHeight = scoreboardEl ? scoreboardEl.offsetHeight : 0;
+
+    const availableWidth = Math.max(40, window.innerWidth - VIEWPORT_PADDING * 2);
+    const availableHeight = Math.max(
+        40,
+        window.innerHeight - menuHeight - infoHeight - scoreboardHeight - VIEWPORT_PADDING * 2
+    );
+
+    actualGrid = Math.max(1, Math.floor(Math.min(availableWidth / columns, availableHeight / rows)));
     canvasWidth = columns * actualGrid;
     canvasHeight = rows * actualGrid;
     canvas.width = canvasWidth;
@@ -32,10 +62,40 @@ let level = 1;
 let gameSpeed = 100; // ms per move (constant)
 let speedMultiplier = 1; // user-adjustable delay factor
 let intervalId;
-let mode = 'double';
+let mode = 'single';
 let numberPos;
 let walls = []; // array of wall segments: {x, y}
 let selectedLevelIdx = 0;
+let isPaused = false;
+let gameEdition = 'deluxe';
+let classicState = 'idle'; // idle | waiting_start | running | waiting_respawn | game_over_prompt
+let classicConfig = { players: 1, speed: 50, speedUp: true, monochrome: false };
+let classicNeedsRespawn = false;
+let onlineStatePollId = null;
+let onlineInputPollId = null;
+let lastOnlinePushAt = 0;
+let isOnlineGuestView = false;
+const MAX_DIRECTION_QUEUE = 6;
+const SCOREBOARD_KEY = 'nibblesScoreboardV1';
+let aiCount = 0;
+let deathResetsAllPlayers = true;
+let manualLevelsOnly = false;
+let godModeEnabled = false;
+
+const ONLINE_PUSH_INTERVAL_MS = 120;
+const ONLINE_POLL_INTERVAL_MS = 140;
+const ONLINE_INPUT_POLL_INTERVAL_MS = 90;
+
+const onlineSession = {
+    mode: 'none', // none | host | peer
+    roomCode: '',
+    token: '',
+    playerId: '',
+    playerName: '',
+    maxPlayers: 5,
+    started: false,
+    players: []
+};
 
 // UI Elements
 const settingsDiv = document.getElementById('settings');
@@ -43,9 +103,13 @@ const infoDiv = document.getElementById('info');
 const levelDisplay = document.getElementById('levelDisplay');
 const scoreDisplay = document.getElementById('scoreDisplay');
 const livesDisplay = document.getElementById('livesDisplay');
+const pauseDisplay = document.getElementById('pauseDisplay');
+const endBtn = document.getElementById('endBtn');
+const pauseBtn = document.getElementById('pauseBtn');
 const levelSelect = document.getElementById('levelSelect');
 const levelEditorDiv = document.getElementById('levelEditor');
 const levelEditorBtn = document.getElementById('levelEditorBtn');
+const resetBtn = document.getElementById('resetBtn');
 const editorCanvas = document.getElementById('editorCanvas');
 const editorCtx = editorCanvas.getContext('2d');
 const editorTool = document.getElementById('editorTool');
@@ -57,82 +121,779 @@ const editorCoordDisplay = document.getElementById('editorCoordDisplay');
 const dotXInput = document.getElementById('dotXInput');
 const dotYInput = document.getElementById('dotYInput');
 const addDotBtn = document.getElementById('addDotBtn');
+const levelVisibilitySelect = document.getElementById('levelVisibility');
+const adminUsernameInput = document.getElementById('adminUsername');
+const adminPasswordInput = document.getElementById('adminPassword');
+const adminLoginBtn = document.getElementById('adminLoginBtn');
+const adminLogoutBtn = document.getElementById('adminLogoutBtn');
+const adminLoginForm = document.getElementById('adminLoginForm');
+const adminStatusBar = document.getElementById('adminStatusBar');
+const adminStatusText = document.getElementById('adminStatusText');
+const adminTopStatus = document.getElementById('adminTopStatus');
+const editorAccessHint = document.getElementById('editorAccessHint');
+const welcomeScreen = document.getElementById('welcomeScreen');
+const appShell = document.getElementById('appShell');
+const startDeluxeBtn = document.getElementById('startDeluxeBtn');
+const startClassicBtn = document.getElementById('startClassicBtn');
+const brandLabel = document.querySelector('#menuBar .brand');
+const welcomeImageFallback = document.getElementById('welcomeImage');
+const backToChooserBtn = document.getElementById('backToChooserBtn');
+const p1Label = document.getElementById('p1label');
+const p2Label = document.getElementById('p2label');
+const classicSetupDiv = document.getElementById('classicSetup');
+const classicQuestion = document.getElementById('classicQuestion');
+const classicAnswerInput = document.getElementById('classicAnswerInput');
+const onlinePanel = document.getElementById('onlinePanel');
+const roomCodeInput = document.getElementById('roomCodeInput');
+const onlineStatus = document.getElementById('onlineStatus');
+const createRoomBtn = document.getElementById('createRoomBtn');
+const joinRoomBtn = document.getElementById('joinRoomBtn');
+const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+const aiCountSelect = document.getElementById('aiCount');
+const onlineMaxPlayersSelect = document.getElementById('onlineMaxPlayers');
+const deathResetAllToggle = document.getElementById('deathResetAllToggle');
+const scoreboardList = document.getElementById('scoreboardList');
+const clearScoresBtn = document.getElementById('clearScoresBtn');
+const adminCredentialPanel = document.getElementById('adminCredentialPanel');
+const newAdminUsernameInput = document.getElementById('newAdminUsername');
+const newAdminPasswordInput = document.getElementById('newAdminPassword');
+const saveAdminCredentialsBtn = document.getElementById('saveAdminCredentialsBtn');
+const adminHackPanel = document.getElementById('adminHackPanel');
+const hackGodModeBtn = document.getElementById('hackGodModeBtn');
+const hackAddLifeBtn = document.getElementById('hackAddLifeBtn');
+const hackAddScoreBtn = document.getElementById('hackAddScoreBtn');
+const hackNextLevelBtn = document.getElementById('hackNextLevelBtn');
+const inGameHackBar = document.getElementById('inGameHackBar');
+const hackGodModeBtnGame = document.getElementById('hackGodModeBtnGame');
+const hackAddLifeBtnGame = document.getElementById('hackAddLifeBtnGame');
+const hackAddScoreBtnGame = document.getElementById('hackAddScoreBtnGame');
+const hackNextLevelBtnGame = document.getElementById('hackNextLevelBtnGame');
 
 // Level storage
 let levels = loadLevels();
+let isAdminLoggedIn = localStorage.getItem('nibblesAdminSession') === '1';
+
+const DEFAULT_ADMIN_CREDENTIALS = {
+    username: 'admin',
+    password: 'admin'
+};
+let adminCredentials = loadAdminCredentials();
+
+let scoreboardEntries = loadScoreboard();
 
 // ===== LEVEL STORAGE & MANAGEMENT =====
 function loadLevels() {
     const raw = localStorage.getItem('nibblesLevels');
-    if (raw) {
-        // always start with only the default level; drop extras
-        let arr = JSON.parse(raw);
-        if (!Array.isArray(arr) || arr.length === 0) {
-            arr = [{ name: 'Level 1', walls: [], starts: [] }];
-        } else {
-            arr = [arr[0]]; // keep just the first entry
-        }
-        // persist the trimmed list back to storage
-        localStorage.setItem('nibblesLevels', JSON.stringify(arr));
-        return arr;
+    if (!raw) {
+        return [{
+            name: 'Level 1',
+            walls: [],
+            starts: [],
+            visibility: 'public',
+            owner: 'system'
+        }];
     }
-    // default level (empty)
-    return [{ name: 'Level 1', walls: [], starts: [] }];
+    try {
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr) || arr.length === 0) {
+            throw new Error('Invalid level data');
+        }
+        return arr.map((lv, idx) => normalizeLevel(lv, idx));
+    } catch (err) {
+        console.warn('Failed to parse levels, using default level.', err);
+        return [{
+            name: 'Level 1',
+            walls: [],
+            starts: [],
+            visibility: 'public',
+            owner: 'system'
+        }];
+    }
+}
+
+function normalizeLevel(levelData, idx) {
+    const safeWalls = Array.isArray(levelData?.walls) ? levelData.walls : [];
+    const safeStarts = Array.isArray(levelData?.starts) ? levelData.starts : [];
+    const safeVisibility = levelData?.visibility === 'admin' ? 'admin' : 'public';
+    const safeName = levelData?.name || `Level ${idx + 1}`;
+    return {
+        name: safeName,
+        walls: safeWalls,
+        starts: safeStarts,
+        visibility: safeVisibility,
+        owner: levelData?.owner || 'admin'
+    };
 }
 
 function saveLevels() {
     localStorage.setItem('nibblesLevels', JSON.stringify(levels));
 }
 
+function loadAdminCredentials() {
+    const raw = localStorage.getItem('nibblesAdminCredentials');
+    if (!raw) return {...DEFAULT_ADMIN_CREDENTIALS};
+    try {
+        const parsed = JSON.parse(raw);
+        const username = String(parsed?.username || '').trim() || DEFAULT_ADMIN_CREDENTIALS.username;
+        const password = String(parsed?.password || '');
+        return {
+            username,
+            password: password || DEFAULT_ADMIN_CREDENTIALS.password
+        };
+    } catch (err) {
+        console.warn('Failed to parse admin credentials, using defaults.', err);
+        return {...DEFAULT_ADMIN_CREDENTIALS};
+    }
+}
+
+function saveAdminCredentials(username, password) {
+    adminCredentials = {username, password};
+    localStorage.setItem('nibblesAdminCredentials', JSON.stringify(adminCredentials));
+}
+
+function loadScoreboard() {
+    const raw = localStorage.getItem(SCOREBOARD_KEY);
+    if (!raw) return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+        console.warn('Failed to parse scoreboard data.', err);
+        return [];
+    }
+}
+
+function saveScoreboard() {
+    localStorage.setItem(SCOREBOARD_KEY, JSON.stringify(scoreboardEntries));
+}
+
+function renderScoreboard() {
+    scoreboardList.innerHTML = '';
+    if (!scoreboardEntries.length) {
+        const li = document.createElement('li');
+        li.textContent = 'No scores yet.';
+        scoreboardList.appendChild(li);
+        return;
+    }
+    scoreboardEntries.forEach((entry) => {
+        const li = document.createElement('li');
+        li.textContent = `${entry.when} | ${entry.edition}/${entry.mode} | ${entry.summary}`;
+        scoreboardList.appendChild(li);
+    });
+}
+
+function addGameToScoreboard() {
+    if (!players.length) return;
+    if (isOnlineGuestView) return;
+    const ranking = [...players].sort((a, b) => b.score - a.score);
+    const summary = ranking.map((p) => `${p.name} ${p.score}`).join(' | ');
+    scoreboardEntries.unshift({
+        when: new Date().toLocaleString(),
+        edition: gameEdition,
+        mode: mode === 'double' ? '2p' : (mode === 'single' ? '1p' : mode),
+        summary
+    });
+    if (scoreboardEntries.length > 30) {
+        scoreboardEntries.length = 30;
+    }
+    saveScoreboard();
+    renderScoreboard();
+}
+
 function getCurrentLevelWalls() {
     return levels[selectedLevelIdx]?.walls || [];
-    if (!levels[selectedLevelIdx]) {
-        levels[selectedLevelIdx] = { name: levelName || `Level ${selectedLevelIdx + 1}`, walls: [], starts: [] };
-    } else if (levelName) {
-        levels[selectedLevelIdx].name = levelName;
-    }
-    levels[selectedLevelIdx].walls = wallArray;
-    if (starts) {
-        levels[selectedLevelIdx].starts = starts;
-    }
-    saveLevels();
+}
+
+function isLevelVisibleToCurrentUser(levelObj) {
+    if (!levelObj) return false;
+    return levelObj.visibility !== 'admin' || isAdminLoggedIn;
 }
 
 function populateLevelSelect() {
+    const previousSelection = Number(levelSelect.value);
     levelSelect.innerHTML = '';
     levels.forEach((lv, idx) => {
+        if (!isLevelVisibleToCurrentUser(lv)) return;
         const opt = document.createElement('option');
         opt.value = idx;
-        opt.textContent = lv.name || `Level ${idx + 1}`;
+        const suffix = lv.visibility === 'admin' ? ' (Admin)' : '';
+        opt.textContent = `${lv.name || `Level ${idx + 1}`}${suffix}`;
         levelSelect.appendChild(opt);
     });
-    // only show 'New Level' option if there are existing levels
-    if (levels.length > 0) {
-        const newOpt = document.createElement('option');
-        newOpt.value = levels.length;
-        newOpt.textContent = '(New Level)';
-        levelSelect.appendChild(newOpt);
+    if (levelSelect.options.length === 0) {
+        // Ensure non-admin users still have at least one playable public level.
+        levels.unshift({
+            name: 'Level 1',
+            walls: [],
+            starts: [],
+            visibility: 'public',
+            owner: 'system'
+        });
+        saveLevels();
+        const fallback = document.createElement('option');
+        fallback.value = '0';
+        fallback.textContent = 'Level 1';
+        levelSelect.appendChild(fallback);
     }
+    const hasPreviousVisible = Array.from(levelSelect.options).some(o => Number(o.value) === previousSelection);
+    if (hasPreviousVisible) {
+        levelSelect.value = String(previousSelection);
+    } else {
+        levelSelect.selectedIndex = 0;
+    }
+    selectedLevelIdx = Number(levelSelect.value);
 }
 
 // ensure the levels array is long enough to include the given index
 function ensureLevelIndex(idx) {
     while (levels.length <= idx) {
-        levels.push({ name: `Level ${levels.length + 1}`, walls: [], starts: [] });
+        levels.push({
+            name: `Level ${levels.length + 1}`,
+            walls: [],
+            starts: [],
+            visibility: 'public',
+            owner: 'admin'
+        });
     }
 }
 
-// ask user for a 1-based level number (2+); returns 0-based index or null if cancelled
+// ask user for a 1-based level number (1+); returns 0-based index or null if cancelled
 function promptForLevelIndex() {
     while (true) {
-        const raw = prompt('Enter level number (2+):', Math.max(2, selectedLevelIdx + 1));
+        const raw = prompt('Enter level number (1+) to save or overwrite:', Math.max(1, selectedLevelIdx + 1));
         if (raw === null) return null;
         const num = parseInt(raw, 10);
-        if (!isNaN(num) && num >= 2) {
+        if (!isNaN(num) && num >= 1) {
             return num - 1;
         }
-        alert('Please enter a valid integer 2 or greater.');
+        alert('Please enter a valid integer 1 or greater.');
     }
+}
+
+function updateAdminUi() {
+    adminUsernameInput.placeholder = `Username (${adminCredentials.username})`;
+    adminPasswordInput.placeholder = 'Password';
+    if (isAdminLoggedIn) {
+        adminLoginForm.style.display = 'none';
+        adminStatusBar.style.display = 'flex';
+        adminCredentialPanel.style.display = 'block';
+        adminStatusText.textContent = `Logged in as ${adminCredentials.username}`;
+        adminTopStatus.textContent = 'Admin: On';
+        levelEditorBtn.disabled = false;
+        levelEditorBtn.style.display = gameEdition === 'classic' ? 'none' : '';
+        resetBtn.style.display = gameEdition === 'classic' ? 'none' : '';
+        adminHackPanel.style.display = gameEdition === 'classic' ? 'none' : '';
+        editorAccessHint.textContent = 'Admin access enabled. You can open the level builder.';
+    } else {
+        adminLoginForm.style.display = 'flex';
+        adminStatusBar.style.display = 'none';
+        adminCredentialPanel.style.display = 'none';
+        adminTopStatus.textContent = 'Admin: Off';
+        levelEditorBtn.disabled = true;
+        levelEditorBtn.style.display = 'none';
+        resetBtn.style.display = 'none';
+        adminHackPanel.style.display = 'none';
+        editorAccessHint.textContent = 'Level builder is admin-only. Log in from the top menu bar.';
+    }
+    populateLevelSelect();
+    updateInGameHackUi();
+}
+
+function applyEditionUi() {
+    const classic = gameEdition === 'classic';
+    levelEditorBtn.style.display = classic || !isAdminLoggedIn ? 'none' : '';
+    resetBtn.style.display = classic || !isAdminLoggedIn ? 'none' : '';
+    adminHackPanel.style.display = classic || !isAdminLoggedIn ? 'none' : '';
+    p1Label.style.display = classic ? 'none' : '';
+    p2Label.style.display = classic ? 'none' : '';
+    aiCountSelect.parentElement.style.display = classic ? 'none' : '';
+    editorAccessHint.style.display = classic ? 'none' : '';
+    onlinePanel.style.display = classic || modeSelect.value !== 'online' ? 'none' : 'block';
+    if (modeSelect.parentElement) {
+        modeSelect.parentElement.style.display = classic ? 'none' : '';
+    }
+    endBtn.style.display = classic ? 'none' : '';
+    if (classic) {
+        modeSelect.value = classicConfig.players === 2 ? 'double' : 'single';
+        modeSelect.dispatchEvent(new Event('change'));
+    }
+    updateInGameHackUi();
+}
+
+const classicQuestions = [
+    { key: 'players', prompt: 'Number of players (1 or 2):', validate: (v) => v === '1' || v === '2' },
+    { key: 'speed', prompt: 'Speed (1-100):', validate: (v) => {
+        const n = parseInt(v, 10);
+        return !isNaN(n) && n >= 1 && n <= 100;
+    }},
+    { key: 'speedUp', prompt: 'Speed up as levels increase? (y/n):', validate: (v) => ['y', 'n'].includes(v.toLowerCase()) },
+    { key: 'monochrome', prompt: 'Monochrome or color? (m/c):', validate: (v) => ['m', 'c'].includes(v.toLowerCase()) }
+];
+let classicQuestionIndex = 0;
+let classicTranscript = [];
+let currentClassicPrompt = '';
+
+function getClassicPalette() {
+    if (classicConfig.monochrome) {
+        return {
+            bg: '#000000',
+            border: '#8c8c8c',
+            walls: '#7a7a7a',
+            hud: '#d6d6d6',
+            numberBg: '#000000',
+            numberText: '#ffffff',
+            p1: '#f5f5f5',
+            p2: '#b3b3b3'
+        };
+    }
+    return {
+        bg: '#000000',
+        border: '#aaaaaa',
+        walls: '#1e6cff',
+        hud: '#ffff55',
+        numberBg: '#000000',
+        numberText: '#00ff00',
+        p1: '#00ffff',
+        p2: '#ff55ff'
+    };
+}
+
+function renderClassicTerminal() {
+    const lines = [...classicTranscript];
+    if (currentClassicPrompt) lines.push(currentClassicPrompt);
+    classicQuestion.textContent = lines.join('\n');
+    classicQuestion.scrollTop = classicQuestion.scrollHeight;
+}
+
+function showClassicQuestion() {
+    const q = classicQuestions[classicQuestionIndex];
+    currentClassicPrompt = q.prompt;
+    renderClassicTerminal();
+    classicAnswerInput.value = '';
+    classicAnswerInput.focus();
+}
+
+function startClassicPromptFlow() {
+    classicQuestionIndex = 0;
+    classicTranscript = [];
+    currentClassicPrompt = '';
+    classicSetupDiv.style.display = 'flex';
+    showClassicQuestion();
+}
+
+function finishClassicSetup() {
+    classicSetupDiv.style.display = 'none';
+    document.body.classList.toggle('classic-color-edition', !classicConfig.monochrome);
+    mode = classicConfig.players === 2 ? 'double' : 'single';
+    modeSelect.value = mode;
+    modeSelect.dispatchEvent(new Event('change'));
+    document.getElementById('speed').value = String(classicConfig.speed);
+    speedMultiplier = (101 - classicConfig.speed) / 50;
+    selectedLevelIdx = parseInt(levelSelect.value, 10);
+    walls = JSON.parse(JSON.stringify(getCurrentLevelWalls()));
+    initPlayersLocal('sammy', 'jake');
+    level = 1;
+    currentNumber = 1;
+    numberPos = randomNumberPosition();
+    isPaused = false;
+    settingsDiv.style.display = 'none';
+    canvas.style.display = 'block';
+    infoDiv.style.display = 'none';
+    classicState = 'waiting_start';
+    updateCanvasMetrics();
+    updateInfo();
+    draw();
+    clearInterval(intervalId);
+    intervalId = setInterval(update, gameSpeed * speedMultiplier);
+}
+
+function handleClassicAnswer() {
+    const raw = classicAnswerInput.value.trim();
+    const q = classicQuestions[classicQuestionIndex];
+    if (!q.validate(raw)) {
+        classicTranscript.push(`${currentClassicPrompt} ${raw}`);
+        classicTranscript.push('Invalid input. Try again.');
+        renderClassicTerminal();
+        return;
+    }
+    classicTranscript.push(`${currentClassicPrompt} ${raw}`);
+    if (q.key === 'players') classicConfig.players = parseInt(raw, 10);
+    if (q.key === 'speed') classicConfig.speed = parseInt(raw, 10);
+    if (q.key === 'speedUp') classicConfig.speedUp = raw.toLowerCase() === 'y';
+    if (q.key === 'monochrome') classicConfig.monochrome = raw.toLowerCase() === 'm';
+
+    classicQuestionIndex += 1;
+    if (classicQuestionIndex >= classicQuestions.length) {
+        finishClassicSetup();
+        return;
+    }
+    showClassicQuestion();
+}
+
+function isOnlineModeSelected() {
+    return modeSelect.value === 'online';
+}
+
+function updateOnlineButtons() {
+    const joined = Boolean(onlineSession.roomCode && onlineSession.token);
+    createRoomBtn.disabled = joined;
+    joinRoomBtn.disabled = joined;
+    leaveRoomBtn.disabled = !joined;
+    onlineMaxPlayersSelect.disabled = joined;
+    deathResetAllToggle.disabled = joined;
+}
+
+function setOnlineStatus(message) {
+    onlineStatus.textContent = message;
+}
+
+function updateInGameHackUi() {
+    const visible = isAdminLoggedIn && gameEdition !== 'classic' && canvas.style.display !== 'none';
+    inGameHackBar.style.display = visible ? 'inline-flex' : 'none';
+}
+
+function stopOnlinePolling() {
+    if (onlineStatePollId) {
+        clearInterval(onlineStatePollId);
+        onlineStatePollId = null;
+    }
+    if (onlineInputPollId) {
+        clearInterval(onlineInputPollId);
+        onlineInputPollId = null;
+    }
+}
+
+async function onlineApi(body, method = 'POST') {
+    const options = {
+        method,
+        headers: {'Content-Type': 'application/json'}
+    };
+    if (method !== 'GET') {
+        options.body = JSON.stringify(body);
+    }
+    const response = await fetch('/api/multiplayer', options);
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok || !json.ok) {
+        throw new Error(json.error || `Network error (${response.status})`);
+    }
+    return json;
+}
+
+function resetOnlineSession(clearUiCode = true) {
+    stopOnlinePolling();
+    onlineSession.mode = 'none';
+    onlineSession.roomCode = '';
+    onlineSession.token = '';
+    onlineSession.playerId = '';
+    onlineSession.playerName = '';
+    onlineSession.players = [];
+    onlineSession.started = false;
+    deathResetsAllPlayers = true;
+    deathResetAllToggle.checked = true;
+    isOnlineGuestView = false;
+    if (clearUiCode) roomCodeInput.value = '';
+    updateOnlineButtons();
+}
+
+async function refreshOnlineRoomStatus() {
+    if (!onlineSession.roomCode || !onlineSession.token) return null;
+    try {
+        const status = await onlineApi({
+            action: 'status',
+            roomCode: onlineSession.roomCode,
+            token: onlineSession.token
+        });
+        onlineSession.players = Array.isArray(status.players) ? status.players : [];
+        onlineSession.maxPlayers = Number(status.maxPlayers || onlineSession.maxPlayers || 5);
+        onlineSession.started = status.started === true;
+        deathResetsAllPlayers = status.deathResetsAll !== false;
+        deathResetAllToggle.checked = deathResetsAllPlayers;
+        return status;
+    } catch (err) {
+        setOnlineStatus(`Room sync failed: ${err.message}`);
+        return null;
+    }
+}
+
+async function createOnlineRoom() {
+    try {
+        const playerName = (document.getElementById('p1name').value || 'Host').trim();
+        const maxPlayers = Math.max(2, Math.min(5, Number(onlineMaxPlayersSelect.value || 5)));
+        const deathResetAll = Boolean(deathResetAllToggle.checked);
+        const result = await onlineApi({action: 'create', playerName, maxPlayers, deathResetAll});
+        onlineSession.mode = 'host';
+        onlineSession.roomCode = result.roomCode;
+        onlineSession.token = result.token;
+        onlineSession.playerId = result.playerId;
+        onlineSession.playerName = playerName;
+        onlineSession.players = result.players || [];
+        onlineSession.maxPlayers = maxPlayers;
+        onlineSession.started = false;
+        deathResetsAllPlayers = deathResetAll;
+        deathResetAllToggle.checked = deathResetsAllPlayers;
+        roomCodeInput.value = result.roomCode;
+        updateOnlineButtons();
+        setOnlineStatus(`Room ${result.roomCode} created. Share code (${onlineSession.players.length}/${maxPlayers} players).`);
+    } catch (err) {
+        setOnlineStatus(`Create failed: ${err.message}`);
+    }
+}
+
+async function joinOnlineRoom() {
+    const roomCode = roomCodeInput.value.trim().toUpperCase();
+    if (!roomCode) {
+        setOnlineStatus('Enter a room code first.');
+        return;
+    }
+    try {
+        const playerName = (document.getElementById('p1name').value || 'Player').trim();
+        const result = await onlineApi({action: 'join', roomCode, playerName});
+        onlineSession.mode = 'peer';
+        onlineSession.roomCode = roomCode;
+        onlineSession.token = result.token;
+        onlineSession.playerId = result.playerId;
+        onlineSession.playerName = playerName;
+        onlineSession.players = result.players || [];
+        onlineSession.maxPlayers = Number(result.maxPlayers || 5);
+        deathResetsAllPlayers = result.deathResetsAll !== false;
+        deathResetAllToggle.checked = deathResetsAllPlayers;
+        onlineSession.started = result.started === true;
+        roomCodeInput.value = roomCode;
+        updateOnlineButtons();
+        setOnlineStatus(`Joined room ${roomCode}. (${onlineSession.players.length}/${onlineSession.maxPlayers})`);
+    } catch (err) {
+        setOnlineStatus(`Join failed: ${err.message}`);
+    }
+}
+
+async function leaveOnlineRoom() {
+    if (!onlineSession.roomCode || !onlineSession.token) {
+        resetOnlineSession();
+        setOnlineStatus('Disconnected from room.');
+        return;
+    }
+    try {
+        await onlineApi({
+            action: 'leave',
+            roomCode: onlineSession.roomCode,
+            token: onlineSession.token
+        });
+    } catch (err) {
+        console.warn('Leave room failed:', err);
+    }
+    resetOnlineSession();
+    setOnlineStatus('Disconnected from room.');
+}
+
+function convertKeyToDirection(key, controls) {
+    if (key === controls.left) return {dx: -grid, dy: 0};
+    if (key === controls.right) return {dx: grid, dy: 0};
+    if (key === controls.up) return {dx: 0, dy: -grid};
+    if (key === controls.down) return {dx: 0, dy: grid};
+    return null;
+}
+
+async function sendOnlinePeerInput(direction) {
+    if (onlineSession.mode !== 'peer' || !onlineSession.token) return;
+    try {
+        await onlineApi({
+            action: 'input',
+            roomCode: onlineSession.roomCode,
+            token: onlineSession.token,
+            direction
+        });
+    } catch (err) {
+        setOnlineStatus(`Input sync failed: ${err.message}`);
+    }
+}
+
+function buildOnlineSnapshot() {
+    return {
+        level,
+        currentNumber,
+        numberPos,
+        walls,
+        players,
+        gameEdition,
+        selectedLevelIdx,
+        mode,
+        deathResetsAllPlayers
+    };
+}
+
+function applyOnlineSnapshot(snapshot) {
+    if (!snapshot) return;
+    setArenaForMode('online');
+    level = snapshot.level;
+    currentNumber = snapshot.currentNumber;
+    numberPos = snapshot.numberPos;
+    walls = snapshot.walls || [];
+    players = snapshot.players || [];
+    mode = snapshot.mode || 'online';
+    deathResetsAllPlayers = snapshot.deathResetsAllPlayers !== false;
+    draw();
+}
+
+async function pushOnlineState(force = false) {
+    if (onlineSession.mode !== 'host' || !onlineSession.token) return;
+    const now = Date.now();
+    if (!force && now - lastOnlinePushAt < ONLINE_PUSH_INTERVAL_MS) return;
+    lastOnlinePushAt = now;
+    try {
+        await onlineApi({
+            action: 'state',
+            roomCode: onlineSession.roomCode,
+            token: onlineSession.token,
+            started: true,
+            state: buildOnlineSnapshot()
+        });
+    } catch (err) {
+        setOnlineStatus(`State sync failed: ${err.message}`);
+    }
+}
+
+async function hostConsumeGuestInputs() {
+    if (onlineSession.mode !== 'host' || !onlineSession.token) return;
+    try {
+        const result = await onlineApi({
+            action: 'consumeInputs',
+            roomCode: onlineSession.roomCode,
+            token: onlineSession.token
+        });
+        const inputsByPlayer = result.inputsByPlayer || {};
+        players.forEach((player) => {
+            if (!player.remoteId || player.remoteId === onlineSession.playerId || player.isAi) return;
+            const arr = Array.isArray(inputsByPlayer[player.remoteId]) ? inputsByPlayer[player.remoteId] : [];
+            if (!arr.length) return;
+            const latest = arr[arr.length - 1];
+            const nextDx = Number(latest.dx);
+            const nextDy = Number(latest.dy);
+            if (
+                Number.isFinite(nextDx) &&
+                Number.isFinite(nextDy) &&
+                !(nextDx === -player.dx && nextDy === -player.dy)
+            ) {
+                const queue = player.directionQueue || (player.directionQueue = []);
+                const last = queue.length ? queue[queue.length - 1] : {dx: player.dx, dy: player.dy};
+                if (!(last.dx === nextDx && last.dy === nextDy)) {
+                    queue.push({dx: nextDx, dy: nextDy});
+                    if (queue.length > MAX_DIRECTION_QUEUE) {
+                        queue.splice(0, queue.length - MAX_DIRECTION_QUEUE);
+                    }
+                }
+            }
+        });
+    } catch (err) {
+        setOnlineStatus(`Player input polling failed: ${err.message}`);
+    }
+}
+
+function startHostInputPolling() {
+    if (onlineInputPollId) clearInterval(onlineInputPollId);
+    onlineInputPollId = setInterval(() => {
+        hostConsumeGuestInputs();
+    }, ONLINE_INPUT_POLL_INTERVAL_MS);
+}
+
+function startGuestStatePolling() {
+    if (onlineStatePollId) clearInterval(onlineStatePollId);
+    onlineStatePollId = setInterval(async () => {
+        if (!onlineSession.roomCode || !onlineSession.token) return;
+        try {
+            const q = new URLSearchParams({
+                action: 'fetch',
+                roomCode: onlineSession.roomCode,
+                token: onlineSession.token
+            });
+            const response = await fetch(`/api/multiplayer?${q.toString()}`);
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.ok) {
+                throw new Error(result.error || `Fetch failed (${response.status})`);
+            }
+            onlineSession.started = result.started === true;
+            onlineSession.players = result.players || onlineSession.players;
+            onlineSession.maxPlayers = Number(result.maxPlayers || onlineSession.maxPlayers || 5);
+            deathResetsAllPlayers = result.deathResetsAll !== false;
+            deathResetAllToggle.checked = deathResetsAllPlayers;
+            if (!onlineSession.started) {
+                setOnlineStatus(`Room ${onlineSession.roomCode} connected. Waiting for host to start.`);
+                return;
+            }
+            if (result.state) {
+                if (canvas.style.display === 'none') {
+                    settingsDiv.style.display = 'none';
+                    canvas.style.display = 'block';
+                    infoDiv.style.display = 'none';
+                    setArenaForMode('online');
+                    updateCanvasMetrics();
+                }
+                isOnlineGuestView = true;
+                setOnlineStatus(`Room ${onlineSession.roomCode} live.`);
+                applyOnlineSnapshot(result.state);
+            }
+        } catch (err) {
+            setOnlineStatus(`State polling failed: ${err.message}`);
+        }
+    }, ONLINE_POLL_INTERVAL_MS);
+}
+
+function returnToChooser() {
+    clearInterval(intervalId);
+    stopOnlinePolling();
+    isPaused = false;
+    updatePauseButtonLabel();
+    classicState = 'idle';
+    gameEdition = 'deluxe';
+    setArenaForMode('single');
+    document.body.classList.remove('classic-edition');
+    document.body.classList.remove('classic-color-edition');
+    if (onlineSession.mode !== 'none') {
+        leaveOnlineRoom();
+    } else {
+        resetOnlineSession();
+    }
+    if (brandLabel) brandLabel.textContent = 'Nibbles Deluxe';
+    settingsDiv.style.display = 'block';
+    levelEditorDiv.style.display = 'none';
+    classicSetupDiv.style.display = 'none';
+    canvas.style.display = 'none';
+    infoDiv.style.display = 'none';
+    updateInGameHackUi();
+    appShell.style.display = 'none';
+    welcomeScreen.style.display = 'flex';
+}
+
+function attemptAdminLogin() {
+    const username = adminUsernameInput.value.trim().toLowerCase();
+    const password = adminPasswordInput.value;
+    if (username === adminCredentials.username.toLowerCase() && password === adminCredentials.password) {
+        isAdminLoggedIn = true;
+        localStorage.setItem('nibblesAdminSession', '1');
+        adminPasswordInput.value = '';
+        updateAdminUi();
+        applyEditionUi();
+        return;
+    }
+    alert('Invalid admin username or password.');
+}
+
+function saveAdminCredentialsFromUi() {
+    if (!isAdminLoggedIn) {
+        alert('Log in as admin first.');
+        return;
+    }
+    const username = newAdminUsernameInput.value.trim();
+    const password = newAdminPasswordInput.value;
+    if (!username || !password) {
+        alert('Enter both username and password.');
+        return;
+    }
+    saveAdminCredentials(username, password);
+    adminUsernameInput.placeholder = `Username (${username})`;
+    adminPasswordInput.placeholder = 'Password';
+    newAdminPasswordInput.value = '';
+    updateAdminUi();
+    alert('Admin credentials updated.');
 }
 
 // ask for a player's start position/direction
@@ -181,13 +942,35 @@ function warnIfNearWall(start) {
     }
 }
 
-function makePlayer(name, idx, startInfo) {
+function getDefaultSpawn(idx) {
+    const edgePadding = 3;
+    const perimeter = [
+        {x: edgePadding, y: edgePadding, dx: grid, dy: 0},
+        {x: columns - edgePadding, y: rows - edgePadding, dx: -grid, dy: 0},
+        {x: edgePadding, y: rows - edgePadding, dx: grid, dy: 0},
+        {x: columns - edgePadding, y: edgePadding, dx: -grid, dy: 0},
+        {x: Math.floor(columns / 2), y: edgePadding, dx: 0, dy: grid},
+        {x: Math.floor(columns / 2), y: rows - edgePadding, dx: 0, dy: -grid},
+        {x: edgePadding, y: Math.floor(rows / 2), dx: grid, dy: 0},
+        {x: columns - edgePadding, y: Math.floor(rows / 2), dx: -grid, dy: 0}
+    ];
+    const base = perimeter[idx % perimeter.length];
+    return {
+        x: base.x * grid,
+        y: base.y * grid,
+        dx: base.dx,
+        dy: base.dy
+    };
+}
+
+function makePlayer(name, idx, startInfo, opts = {}) {
     // allow specifying a custom start (x,y,dx,dy) from level data
     const start = startInfo || {};
-    const defaultX = idx === 0 ? 2 * grid : (columns - 3) * grid;
-    const defaultY = idx === 0 ? 2 * grid : (rows - 3) * grid;
-    const defaultDx = idx === 0 ? grid : -grid;
-    const defaultDy = 0;
+    const fallback = getDefaultSpawn(idx);
+    const defaultX = fallback.x;
+    const defaultY = fallback.y;
+    const defaultDx = fallback.dx;
+    const defaultDy = fallback.dy;
     // Start with 3 segments so the snake is visible
     const body = [{x: start.x ?? defaultX, y: start.y ?? defaultY}];
     for (let i = 1; i < 3; i++) {
@@ -195,13 +978,17 @@ function makePlayer(name, idx, startInfo) {
     }
     return {
         name,
-        color: idx === 0 ? '#ff0' : '#faa',
+        color: gameEdition === 'classic'
+            ? (idx === 0 ? getClassicPalette().p1 : getClassicPalette().p2)
+            : (idx === 0 ? '#ff0' : '#faa'),
         body: body,
         dx: start.dx ?? defaultDx,
         dy: start.dy ?? defaultDy,
-        queuedDirection: null,
+        directionQueue: [],
         lives: 5,
         score: 0,
+        remoteId: opts.remoteId || '',
+        isAi: Boolean(opts.isAi),
         targetLength: 3, // desired body length in segments (start visible)
         // player one uses the arrows, player two uses WASD
         controls: idx === 0
@@ -210,12 +997,34 @@ function makePlayer(name, idx, startInfo) {
     };
 }
 
-function initPlayers(p1name, p2name) {
+function initPlayersLocal(p1name, p2name) {
     // if level has explicit start info use it, otherwise fallback
     const starts = levels[selectedLevelIdx]?.starts || [];
     players = [makePlayer(p1name, 0, starts[0])];
     if (mode === 'double') {
         players.push(makePlayer(p2name, 1, starts[1]));
+    }
+    const requestedAi = Math.max(0, Math.min(4, Number(aiCountSelect.value || 0)));
+    const remaining = Math.max(0, 5 - players.length);
+    const aiToAdd = Math.min(requestedAi, remaining);
+    for (let i = 0; i < aiToAdd; i++) {
+        players.push(makePlayer(`BOT-${i + 1}`, players.length, null, {isAi: true}));
+    }
+}
+
+function initPlayersOnlineFromRoom() {
+    const roomPlayers = Array.isArray(onlineSession.players) ? onlineSession.players : [];
+    players = roomPlayers.map((rp, idx) => makePlayer(
+        rp.name || `P${idx + 1}`,
+        idx,
+        null,
+        {remoteId: rp.id, isAi: false}
+    ));
+    aiCount = Math.max(0, Math.min(4, Number(aiCountSelect.value || 0)));
+    const remaining = Math.max(0, 5 - players.length);
+    const aiToAdd = Math.min(aiCount, remaining);
+    for (let i = 0; i < aiToAdd; i++) {
+        players.push(makePlayer(`BOT-${i + 1}`, players.length, null, {isAi: true}));
     }
 }
 
@@ -255,34 +1064,133 @@ function randomNumberPosition() {
     return {x: grid * 10, y: grid * 10}; // fallback
 }
 
+function cellBlocked(x, y, sourcePlayer = null) {
+    const maxX = columns * grid;
+    const maxY = rows * grid;
+    if (x < 0 || x >= maxX || y < 0 || y >= maxY) return true;
+    if (walls.some((w) => w.x === x && w.y === y)) return true;
+    for (const player of players) {
+        if (player === sourcePlayer && player.body.length > 0) {
+            for (let i = 0; i < player.body.length - 1; i++) {
+                const seg = player.body[i];
+                if (seg.x === x && seg.y === y) return true;
+            }
+            continue;
+        }
+        for (const seg of player.body) {
+            if (seg.x === x && seg.y === y) return true;
+        }
+    }
+    return false;
+}
+
+function queueDirection(player, dx, dy) {
+    const queue = player.directionQueue || (player.directionQueue = []);
+    const base = queue.length ? queue[queue.length - 1] : {dx: player.dx, dy: player.dy};
+    if (dx === -base.dx && dy === -base.dy) return;
+    if (dx === base.dx && dy === base.dy) return;
+    queue.push({dx, dy});
+    if (queue.length > MAX_DIRECTION_QUEUE) {
+        queue.splice(0, queue.length - MAX_DIRECTION_QUEUE);
+    }
+}
+
+function chooseAiDirection(player) {
+    if (!player || !player.isAi || player.lives <= 0 || !player.body.length) return;
+    const head = player.body[0];
+    const options = [
+        {dx: grid, dy: 0},
+        {dx: -grid, dy: 0},
+        {dx: 0, dy: grid},
+        {dx: 0, dy: -grid}
+    ];
+    options.sort((a, b) => {
+        const ax = head.x + a.dx;
+        const ay = head.y + a.dy;
+        const bx = head.x + b.dx;
+        const by = head.y + b.dy;
+        const ad = Math.abs(ax - numberPos.x) + Math.abs(ay - numberPos.y);
+        const bd = Math.abs(bx - numberPos.x) + Math.abs(by - numberPos.y);
+        return ad - bd;
+    });
+    for (const option of options) {
+        if (option.dx === -player.dx && option.dy === -player.dy) continue;
+        const nx = head.x + option.dx;
+        const ny = head.y + option.dy;
+        if (!cellBlocked(nx, ny, player)) {
+            queueDirection(player, option.dx, option.dy);
+            return;
+        }
+    }
+}
+
 function draw() {
-    ctx.fillStyle = '#fff'; // white playing field
+    const isClassic = gameEdition === 'classic';
+    const classicPalette = getClassicPalette();
+    const topOffset = isClassic ? actualGrid : 0;
+    const arenaHeight = isClassic ? Math.max(1, canvas.height - topOffset) : canvas.height;
+
+    ctx.fillStyle = isClassic ? classicPalette.bg : '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#f00';
+    ctx.strokeStyle = isClassic ? classicPalette.border : '#f00';
     ctx.lineWidth = 2;
-    ctx.strokeRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeRect(0, topOffset, canvas.width, arenaHeight);
+
+    if (isClassic) {
+        const p1 = players[0];
+        const p2 = players[1];
+        ctx.fillStyle = classicPalette.hud;
+        ctx.font = `${Math.max(10, Math.floor(actualGrid * 0.8))}px "Courier New", monospace`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillText(`PTS ${p1 ? p1.score : 0}`, 6, topOffset / 2);
+        if (p2) {
+            const rightText = `PTS ${p2.score}`;
+            const tw = ctx.measureText(rightText).width;
+            ctx.fillText(rightText, canvas.width - tw - 6, topOffset / 2);
+        }
+        ctx.textAlign = 'center';
+        ctx.fillText(`LEVEL ${level}`, canvas.width / 2, topOffset / 2);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = classicPalette.hud;
+        if (p1) ctx.fillText(p1.name, 8, topOffset + Math.max(8, actualGrid / 2));
+        if (p2) {
+            const nW = ctx.measureText(p2.name).width;
+            ctx.fillText(p2.name, canvas.width - nW - 8, topOffset + Math.max(8, actualGrid / 2));
+        }
+    }
 
     // draw walls
-    ctx.fillStyle = '#000';
+    ctx.fillStyle = isClassic ? classicPalette.walls : '#000';
     walls.forEach(wall => {
         const wx = wall.x / grid * actualGrid;
-        const wy = wall.y / grid * actualGrid;
+        const wy = wall.y / grid * actualGrid + topOffset;
         ctx.fillRect(wx, wy, actualGrid, actualGrid);
     });
 
     // number tile (2 cells tall)
     const nx = (numberPos.x / grid) * actualGrid;
-    const ny = (numberPos.y / grid) * actualGrid;
-    ctx.fillStyle = '#fff';
+    const ny = (numberPos.y / grid) * actualGrid + topOffset;
+    ctx.fillStyle = isClassic ? classicPalette.numberBg : '#fff';
     ctx.fillRect(nx, ny, actualGrid, actualGrid * 2);
-    ctx.fillStyle = '#000';
-    ctx.font = Math.floor(actualGrid * 1.5) + 'px sans-serif';
+    ctx.fillStyle = isClassic ? classicPalette.numberText : '#000';
+    ctx.font = Math.floor(actualGrid * 1.5) + (isClassic ? 'px "Courier New", monospace' : 'px sans-serif');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(currentNumber, nx + actualGrid / 2, ny + actualGrid);
 
-    // players (draw as rounded polyline rather than individual squares)
     players.forEach(p => {
+        if (isClassic) {
+            p.body.forEach(seg => {
+                const sx = seg.x / grid * actualGrid;
+                const sy = seg.y / grid * actualGrid + topOffset;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(sx, sy, actualGrid, actualGrid);
+            });
+            return;
+        }
+
+        // Deluxe: rounded snakes
         ctx.strokeStyle = p.color;
         ctx.lineWidth = actualGrid;
         ctx.lineJoin = 'round';
@@ -290,28 +1198,57 @@ function draw() {
         ctx.beginPath();
         p.body.forEach((seg, i) => {
             const cx = seg.x / grid * actualGrid + actualGrid / 2;
-            const cy = seg.y / grid * actualGrid + actualGrid / 2;
+            const cy = seg.y / grid * actualGrid + actualGrid / 2 + topOffset;
             if (i === 0) ctx.moveTo(cx, cy);
             else ctx.lineTo(cx, cy);
         });
         ctx.stroke();
     });
+
+    if (isClassic && classicState !== 'running') {
+        ctx.fillStyle = classicPalette.hud;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `${Math.max(12, Math.floor(actualGrid * 1.2))}px "Courier New", monospace`;
+        let msg = 'PRESS SPACE TO START';
+        if (classicState === 'waiting_respawn') msg = 'PRESS SPACE TO CONTINUE';
+        if (classicState === 'game_over_prompt') msg = 'GAME OVER - START OVER OR QUIT? (Y/N)';
+        ctx.fillText(msg, canvas.width / 2, canvas.height / 2);
+    }
 }
 
 function update() {
+    if (isOnlineGuestView && onlineSession.mode === 'peer') {
+        draw();
+        return;
+    }
+    if (gameEdition === 'classic' && classicState !== 'running') {
+        draw();
+        updateInfo();
+        return;
+    }
+
     let collisionOccurred = false;
     players.forEach(p => {
         if (collisionOccurred) return;
+        if (p.lives <= 0 || !p.body.length) return;
+        if (p.isAi) {
+            chooseAiDirection(p);
+        }
 
-        // Apply at most one queued turn per tick to avoid instant double-turn self collisions.
-        if (p.queuedDirection) {
-            const nextDx = p.queuedDirection.dx;
-            const nextDy = p.queuedDirection.dy;
-            if (!(nextDx === -p.dx && nextDy === -p.dy)) {
+        // Apply one buffered direction per tick so fast inputs are not dropped.
+        if (Array.isArray(p.directionQueue) && p.directionQueue.length > 0) {
+            while (p.directionQueue.length > 0) {
+                const next = p.directionQueue.shift();
+                const nextDx = next.dx;
+                const nextDy = next.dy;
+                if (nextDx === -p.dx && nextDy === -p.dy) {
+                    continue;
+                }
                 p.dx = nextDx;
                 p.dy = nextDy;
+                break;
             }
-            p.queuedDirection = null;
         }
 
         const head = {x: p.body[0].x + p.dx, y: p.body[0].y + p.dy};
@@ -365,7 +1302,12 @@ function update() {
             p.targetLength += growthAmount;
             currentNumber++;
             if (currentNumber > 9) {
-                nextLevel();
+                if (manualLevelsOnly) {
+                    currentNumber = 1;
+                    numberPos = randomNumberPosition();
+                } else {
+                    nextLevel();
+                }
             } else {
                 numberPos = randomNumberPosition();
             }
@@ -379,95 +1321,137 @@ function update() {
     });
     draw();
     updateInfo();
+    if (isOnlineModeSelected() && onlineSession.mode === 'host') {
+        pushOnlineState();
+    }
     checkGameOver();
 }
 
+function respawnPlayer(player, idx) {
+    const starts = levels[selectedLevelIdx]?.starts || [];
+    const fallback = getDefaultSpawn(idx);
+    const startX = starts[idx]?.x ?? fallback.x;
+    const startY = starts[idx]?.y ?? fallback.y;
+    const startDx = starts[idx]?.dx ?? fallback.dx;
+    const startDy = starts[idx]?.dy ?? fallback.dy;
+    const body = [{x: startX, y: startY}];
+    for (let i = 1; i < 3; i++) {
+        body.push({x: startX - i * startDx, y: startY - i * startDy});
+    }
+    player.body = body;
+    player.dx = startDx;
+    player.dy = startDy;
+    player.directionQueue = [];
+    player.targetLength = 3;
+}
+
 function die(player) {
+    if (godModeEnabled && isAdminLoggedIn && !player.isAi) {
+        return;
+    }
     player.lives -= 1;
-    player.score -= 1000;
-    if (player.score < 0) player.score = 0; // allow negative but show as 0
-    if (player.lives < 0) player.lives = 0; // clamp at 0
-    
-    if (mode === 'double') {
-        // In multiplayer, reset level for both players
-        players.forEach(p => {
-            const idx = players.indexOf(p);
-            const starts = levels[selectedLevelIdx]?.starts || [];
-            let startX, startY, startDx, startDy;
-            if (starts[idx]) {
-                startX = starts[idx].x;
-                startY = starts[idx].y;
-                startDx = starts[idx].dx;
-                startDy = starts[idx].dy;
-            } else {
-                startX = idx === 0 ? 2*grid : (columns-3)*grid;
-                startY = idx === 0 ? 2*grid : (rows-3)*grid;
-                startDx = idx === 0 ? grid : -grid;
-                startDy = 0;
-            }
-            const body = [{x: startX, y: startY}];
-            for (let i = 1; i < 3; i++) {
-                body.push({x: startX - i * startDx, y: startY - i * startDy});
-            }
-            p.body = body;
-            p.dx = startDx;
-            p.dy = startDy;
-            p.queuedDirection = null;
-            p.targetLength = 3;
+    player.score = Math.max(0, player.score - 1000);
+    player.lives = Math.max(0, player.lives);
+
+    const multiplayerMatch = players.length > 1;
+    if (multiplayerMatch && deathResetsAllPlayers) {
+        players.forEach((p, idx) => {
+            if (p.lives > 0) respawnPlayer(p, idx);
+            else p.body = [];
         });
-        // Reset food position
         numberPos = randomNumberPosition();
     } else {
-        // In single player, just reset this player
         const idx = players.indexOf(player);
-        const starts = levels[selectedLevelIdx]?.starts || [];
-        let startX, startY, startDx, startDy;
-        if (starts[idx]) {
-            startX = starts[idx].x;
-            startY = starts[idx].y;
-            startDx = starts[idx].dx;
-            startDy = starts[idx].dy;
+        if (player.lives > 0) {
+            respawnPlayer(player, idx);
         } else {
-            startX = idx === 0 ? 2*grid : (columns-3)*grid;
-            startY = idx === 0 ? 2*grid : (rows-3)*grid;
-            startDx = idx === 0 ? grid : -grid;
-            startDy = 0;
+            player.body = [];
+            player.directionQueue = [];
         }
-        const body = [{x: startX, y: startY}];
-        for (let i = 1; i < 3; i++) {
-            body.push({x: startX - i * startDx, y: startY - i * startDy});
-        }
-        player.body = body;
-        player.dx = startDx;
-        player.dy = startDy;
-        player.queuedDirection = null;
-        player.targetLength = 3;
+    }
+
+    if (gameEdition === 'classic') {
+        classicState = 'waiting_respawn';
+        classicNeedsRespawn = true;
     }
 }
 
 function nextLevel() {
+    if (manualLevelsOnly) {
+        currentNumber = 1;
+        numberPos = randomNumberPosition();
+        return;
+    }
     level++;
     currentNumber = 1;
-    // speedMultiplier increases with level, but gameSpeed stays constant
-    speedMultiplier = Math.max(0.2, 1 - (level - 1) * 0.1);
+    // speedMultiplier increases with level unless classic speed-up is disabled.
+    if (gameEdition === 'classic') {
+        if (classicConfig.speedUp) {
+            speedMultiplier = Math.max(0.2, 1 - (level - 1) * 0.1);
+        }
+    } else {
+        speedMultiplier = Math.max(0.2, 1 - (level - 1) * 0.1);
+    }
     clearInterval(intervalId);
     intervalId = setInterval(update, gameSpeed * speedMultiplier);
     numberPos = randomNumberPosition();
 }
 
 function updateInfo() {
+    if (gameEdition === 'classic') {
+        levelDisplay.textContent = '';
+        scoreDisplay.textContent = '';
+        livesDisplay.textContent = '';
+        pauseDisplay.style.display = 'none';
+        return;
+    }
     levelDisplay.textContent = `Level: ${level}`;
     let scoreText = players.map(p => `${p.name}: ${p.score}`).join(' | ');
     let livesText = players.map(p => `${p.name} lives: ${p.lives}`).join(' | ');
     scoreDisplay.textContent = scoreText;
     livesDisplay.textContent = livesText;
+    pauseDisplay.style.display = isPaused ? 'inline' : 'none';
+}
+
+function updatePauseButtonLabel() {
+    pauseBtn.textContent = isPaused ? 'Resume' : 'Pause';
+}
+
+function togglePause() {
+    if (gameEdition === 'classic') return;
+    if (canvas.style.display === 'none') return;
+    if (levelEditorDiv.style.display !== 'none') return;
+    if (isOnlineGuestView) return;
+
+    isPaused = !isPaused;
+    if (isPaused) {
+        clearInterval(intervalId);
+    } else {
+        clearInterval(intervalId);
+        intervalId = setInterval(update, gameSpeed * speedMultiplier);
+    }
+    updatePauseButtonLabel();
+    updateInfo();
 }
 
 function changeDirection(event) {
+    if (gameEdition === 'classic' && classicState !== 'running') return;
     const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
-    players.forEach(p => {
-        if (p.queuedDirection) return;
+    if (isOnlineGuestView && onlineSession.mode === 'peer') {
+        const controls = {up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight'};
+        const fallbackControls = {up: 'w', down: 's', left: 'a', right: 'd'};
+        const direction = convertKeyToDirection(key, controls) || convertKeyToDirection(key, fallbackControls);
+        if (direction) {
+            event.preventDefault();
+            sendOnlinePeerInput(direction);
+        }
+        return;
+    }
 
+    const controllingPlayers = (isOnlineModeSelected() && onlineSession.mode === 'host')
+        ? players.filter((p) => p.remoteId === onlineSession.playerId)
+        : players.filter((p) => !p.isAi);
+    controllingPlayers.forEach(p => {
         let nextDx = null;
         let nextDy = null;
         if (key === p.controls.left) {
@@ -481,11 +1465,7 @@ function changeDirection(event) {
         }
 
         if (nextDx === null) return;
-        if (nextDx === -p.dx && nextDy === -p.dy) return;
-
-        if (!(nextDx === p.dx && nextDy === p.dy)) {
-            p.queuedDirection = {dx: nextDx, dy: nextDy};
-        }
+        queueDirection(p, nextDx, nextDy);
     });
 }
 
@@ -494,31 +1474,101 @@ document.getElementById('endBtn').addEventListener('click', gameOver);
 
 const modeSelect = document.getElementById('mode');
 modeSelect.addEventListener('change', () => {
-    const p2field = document.getElementById('p2name').parentElement;
-    if (modeSelect.value === 'single') {
-        p2field.style.display = 'none';
-    } else {
+    const p2field = document.getElementById('p2label');
+    const modeValue = modeSelect.value;
+    if (modeValue === 'double') {
         p2field.style.display = '';
+    } else {
+        p2field.style.display = 'none';
+    }
+    onlinePanel.style.display = modeValue === 'online' && gameEdition !== 'classic' ? 'block' : 'none';
+    aiCountSelect.parentElement.style.display = gameEdition === 'classic' ? 'none' : '';
+    if (modeValue !== 'online' && onlineSession.mode !== 'none') {
+        leaveOnlineRoom();
+        setOnlineStatus('Online room closed. Local mode selected.');
     }
 });
 modeSelect.dispatchEvent(new Event('change'));
 
-function start() {
+async function start() {
+    if (gameEdition === 'classic') return;
+    classicState = 'idle';
     mode = document.getElementById('mode').value;
-    selectedLevelIdx = parseInt(levelSelect.value);
+    deathResetsAllPlayers = Boolean(deathResetAllToggle.checked);
+    aiCount = Math.max(0, Math.min(4, Number(aiCountSelect.value || 0)));
+
+    if (mode === 'online') {
+        if (onlineSession.mode === 'none' || !onlineSession.roomCode || !onlineSession.token) {
+            setOnlineStatus('Create or join a room first.');
+            return;
+        }
+
+        setArenaForMode('online');
+        walls = []; // Slither-like: open arena
+        const speedInput = parseInt(document.getElementById('speed').value, 10);
+        speedMultiplier = (101 - speedInput) / 50;
+        level = 1;
+        currentNumber = 1;
+        manualLevelsOnly = true;
+        isPaused = false;
+        updatePauseButtonLabel();
+        settingsDiv.style.display = 'none';
+        canvas.style.display = 'block';
+        infoDiv.style.display = 'none';
+        updateInGameHackUi();
+        updateCanvasMetrics();
+
+        if (onlineSession.mode === 'host') {
+            const status = await refreshOnlineRoomStatus();
+            if (!status) return;
+            mode = 'online';
+            initPlayersOnlineFromRoom();
+            numberPos = randomNumberPosition();
+            isOnlineGuestView = false;
+            clearInterval(intervalId);
+            intervalId = setInterval(update, gameSpeed * speedMultiplier);
+            startHostInputPolling();
+            pushOnlineState(true);
+            setOnlineStatus(`Hosting room ${onlineSession.roomCode}.`);
+            return;
+        }
+
+        // Guest mode: render host snapshots only.
+        players = [];
+        isOnlineGuestView = true;
+        clearInterval(intervalId);
+        startGuestStatePolling();
+        setOnlineStatus(`Connected to ${onlineSession.roomCode}. Waiting for host state...`);
+        return;
+    }
+
+    resetOnlineSession();
+    manualLevelsOnly = false;
+    setArenaForMode(mode);
+    deathResetsAllPlayers = mode === 'double';
+    selectedLevelIdx = parseInt(levelSelect.value, 10);
+    if (!isLevelVisibleToCurrentUser(levels[selectedLevelIdx])) {
+        alert('You do not have access to this level.');
+        populateLevelSelect();
+        return;
+    }
     walls = JSON.parse(JSON.stringify(getCurrentLevelWalls())); // deep copy
     const p1 = document.getElementById('p1name').value || 'Player1';
     const p2 = document.getElementById('p2name').value || 'Player2';
     const speedInput = parseInt(document.getElementById('speed').value, 10);
     // map 1-100 to speedMultiplier (1=fast, 100=slow)
     speedMultiplier = (101 - speedInput) / 50;
-    initPlayers(p1, p2);
+    initPlayersLocal(p1, p2);
     level = 1;
     currentNumber = 1;
     numberPos = randomNumberPosition();
+    isPaused = false;
+    updatePauseButtonLabel();
     settingsDiv.style.display = 'none';
     canvas.style.display = 'block';
     infoDiv.style.display = 'block';
+    updateInGameHackUi();
+    updateCanvasMetrics();
     updateInfo();
     draw();
     clearInterval(intervalId);
@@ -526,10 +1576,20 @@ function start() {
 }
 
 document.getElementById('startBtn').addEventListener('click', start);
+createRoomBtn.addEventListener('click', createOnlineRoom);
+joinRoomBtn.addEventListener('click', joinOnlineRoom);
+leaveRoomBtn.addEventListener('click', leaveOnlineRoom);
+pauseBtn.addEventListener('click', togglePause);
 
 function resetLevels() {
     if (confirm('Reset all levels to default? This cannot be undone.')) {
-        levels = [{ name: 'Level 1', walls: [], starts: [] }];
+        levels = [{
+            name: 'Level 1',
+            walls: [],
+            starts: [],
+            visibility: 'public',
+            owner: 'system'
+        }];
         saveLevels();
         populateLevelSelect();
         levelSelect.value = 0;
@@ -540,19 +1600,100 @@ function resetLevels() {
 document.getElementById('resetBtn').addEventListener('click', resetLevels);
 
 function checkGameOver() {
-    if (mode === 'single') {
-        if (players[0].lives === 0) gameOver();
-    } else {
-        if (players.some(p => p.lives === 0)) gameOver();
+    if (!players.length) return;
+    if (players.length === 1) {
+        if (players[0].lives <= 0) gameOver();
+        return;
+    }
+    const alive = players.filter((p) => p.lives > 0);
+    if (alive.length <= 1) {
+        gameOver();
     }
 }
 
 function gameOver() {
     clearInterval(intervalId);
+    stopOnlinePolling();
+    isPaused = false;
+    updatePauseButtonLabel();
+    addGameToScoreboard();
+    if (gameEdition === 'classic') {
+        classicState = 'game_over_prompt';
+        draw();
+        return;
+    }
+    if (isOnlineModeSelected() && onlineSession.mode === 'host') {
+        pushOnlineState(true);
+    }
     settingsDiv.style.display='block';
     canvas.style.display='none';
     infoDiv.style.display='none';
+    updateInGameHackUi();
+    isOnlineGuestView = false;
+    updateCanvasMetrics();
 }
+
+adminLoginBtn.addEventListener('click', attemptAdminLogin);
+
+adminLogoutBtn.addEventListener('click', () => {
+    isAdminLoggedIn = false;
+    localStorage.removeItem('nibblesAdminSession');
+    updateAdminUi();
+    applyEditionUi();
+});
+
+adminPasswordInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        attemptAdminLogin();
+    }
+});
+
+adminUsernameInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        attemptAdminLogin();
+    }
+});
+
+saveAdminCredentialsBtn.addEventListener('click', saveAdminCredentialsFromUi);
+
+function runHackToggleGodMode() {
+    if (!isAdminLoggedIn) return;
+    godModeEnabled = !godModeEnabled;
+    setOnlineStatus(`God mode: ${godModeEnabled ? 'ON' : 'OFF'}`);
+}
+
+function runHackAddLife() {
+    if (!isAdminLoggedIn) return;
+    players.forEach((p) => {
+        p.lives += 1;
+    });
+    updateInfo();
+}
+
+function runHackAddScore() {
+    if (!isAdminLoggedIn || !players[0]) return;
+    players[0].score += 1000;
+    updateInfo();
+}
+
+function runHackNextLevel() {
+    if (!isAdminLoggedIn) return;
+    const prevManual = manualLevelsOnly;
+    manualLevelsOnly = false;
+    nextLevel();
+    manualLevelsOnly = prevManual;
+}
+
+hackGodModeBtn.addEventListener('click', runHackToggleGodMode);
+hackAddLifeBtn.addEventListener('click', runHackAddLife);
+hackAddScoreBtn.addEventListener('click', runHackAddScore);
+hackNextLevelBtn.addEventListener('click', runHackNextLevel);
+hackGodModeBtnGame.addEventListener('click', runHackToggleGodMode);
+hackAddLifeBtnGame.addEventListener('click', runHackAddLife);
+hackAddScoreBtnGame.addEventListener('click', runHackAddScore);
+hackNextLevelBtnGame.addEventListener('click', runHackNextLevel);
 
 // ===== LEVEL EDITOR =====
 let editorWalls = [];
@@ -562,6 +1703,12 @@ let editorStarts = [null, null];
 let settingStart = null; // used when user is interactively placing a start
 
 function initEditor() {
+    if (!isAdminLoggedIn) {
+        alert('Only admin can access the level builder.');
+        levelEditorDiv.style.display = 'none';
+        settingsDiv.style.display = 'block';
+        return;
+    }
     // set editor canvas to match actual game field dimensions
     editorCanvas.width = columns * grid;
     editorCanvas.height = rows * grid;
@@ -585,6 +1732,7 @@ function initEditor() {
     dotXInput.max = columns;
     dotYInput.min = 1;
     dotYInput.max = rows;
+    levelVisibilitySelect.value = levels[selectedLevelIdx]?.visibility === 'admin' ? 'admin' : 'public';
     updateEditorCommitState();
     drawEditor();
 }
@@ -617,6 +1765,22 @@ function drawEditor() {
             editorCtx.lineTo(w, y);
             editorCtx.stroke();
         }
+    }
+
+    // draw coordinate labels every 5 cells on top and left edges
+    editorCtx.fillStyle = '#2563eb';
+    editorCtx.font = `bold ${Math.max(9, Math.floor(editorGrid * 0.6))}px Arial`;
+    editorCtx.textAlign = 'center';
+    editorCtx.textBaseline = 'top';
+    for (let col = 0; col < columns; col += 5) {
+        const x = col * editorGrid + editorGrid / 2;
+        editorCtx.fillText(String(col + 1), x, 2);
+    }
+    editorCtx.textAlign = 'left';
+    editorCtx.textBaseline = 'middle';
+    for (let row = 0; row < rows; row += 5) {
+        const y = row * editorGrid + editorGrid / 2;
+        editorCtx.fillText(String(row + 1), 2, y);
     }
 
     // draw walls
@@ -1032,13 +2196,21 @@ addDotBtn.addEventListener('click', () => {
 });
 
 editorSave.addEventListener('click', () => {
+    if (!isAdminLoggedIn) {
+        alert('Only admin can save levels.');
+        return;
+    }
     // choose which level number to save as (may be new)
     const idx = promptForLevelIndex();
     if (idx === null) return; // user cancelled
     ensureLevelIndex(idx);
 
     // Use existing level name or generate default
-    const levelName = levels[idx]?.name || `Level ${idx + 1}`;
+    const previousName = levels[idx]?.name || `Level ${idx + 1}`;
+    const levelNameInput = prompt('Level name:', previousName);
+    if (levelNameInput === null) return;
+    const levelName = levelNameInput.trim() || previousName;
+    const visibility = levelVisibilitySelect.value === 'admin' ? 'admin' : 'public';
 
     // ask for player start info, but use any interactive values already set
     let start1 = editorStarts[0];
@@ -1058,6 +2230,8 @@ editorSave.addEventListener('click', () => {
     levels[idx].name = levelName;
     levels[idx].walls = JSON.parse(JSON.stringify(editorWalls));
     levels[idx].starts = [start1, start2];
+    levels[idx].visibility = visibility;
+    levels[idx].owner = 'admin';
     saveLevels();
 
     // switch selection to the level just saved, and refresh the dropdown
@@ -1075,6 +2249,30 @@ editorCancel.addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
+    if (gameEdition === 'classic') {
+        const key = e.key.toLowerCase();
+        if (key === ' ' && (classicState === 'waiting_start' || classicState === 'waiting_respawn')) {
+            e.preventDefault();
+            classicState = 'running';
+            classicNeedsRespawn = false;
+            draw();
+            return;
+        }
+        if (classicState === 'game_over_prompt' && (key === 'y' || key === 'n')) {
+            e.preventDefault();
+            if (key === 'y') {
+                finishClassicSetup();
+            } else {
+                returnToChooser();
+            }
+            return;
+        }
+    }
+    if (e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        togglePause();
+        return;
+    }
     if (e.key === 'Escape' && levelEditorDiv.style.display !== 'none') {
         editorTool_points = [];
         drawEditor();
@@ -1082,15 +2280,78 @@ document.addEventListener('keydown', (e) => {
 });
 
 levelEditorBtn.addEventListener('click', () => {
-    selectedLevelIdx = parseInt(levelSelect.value);
+    if (!isAdminLoggedIn) {
+        alert('Please log in as admin to open the level builder.');
+        return;
+    }
+    selectedLevelIdx = parseInt(levelSelect.value, 10);
     settingsDiv.style.display = 'none';
     levelEditorDiv.style.display = 'flex';
     setTimeout(() => initEditor(), 10);
 });
 
+clearScoresBtn.addEventListener('click', () => {
+    scoreboardEntries = [];
+    saveScoreboard();
+    renderScoreboard();
+});
+
 // Initialize
 populateLevelSelect();
-levelSelect.value = selectedLevelIdx;
+levelSelect.value = String(selectedLevelIdx);
+deathResetAllToggle.checked = true;
+updateAdminUi();
+updateOnlineButtons();
+updatePauseButtonLabel();
+renderScoreboard();
+setOnlineStatus('Mode is local until you create or join a room.');
+welcomeScreen.style.display = 'flex';
+appShell.style.display = 'none';
+
+function startFromWelcome(edition) {
+    gameEdition = edition;
+    const classic = edition === 'classic';
+    document.body.classList.toggle('classic-edition', classic);
+    document.body.classList.toggle('classic-color-edition', false);
+    if (brandLabel) {
+        brandLabel.textContent = classic ? 'Nibbles Classic' : 'Nibbles Deluxe';
+    }
+    modeSelect.value = classic ? 'double' : 'single';
+    modeSelect.dispatchEvent(new Event('change'));
+    applyEditionUi();
+    welcomeScreen.style.display = 'none';
+    appShell.style.display = 'flex';
+    if (classic) {
+        settingsDiv.style.display = 'none';
+        updateInGameHackUi();
+        startClassicPromptFlow();
+    } else {
+        settingsDiv.style.display = 'block';
+        canvas.style.display = 'none';
+        infoDiv.style.display = 'none';
+        updateInGameHackUi();
+        updateCanvasMetrics();
+    }
+}
+
+if (startDeluxeBtn && startClassicBtn) {
+    startDeluxeBtn.addEventListener('click', () => startFromWelcome('deluxe'));
+    startClassicBtn.addEventListener('click', () => startFromWelcome('classic'));
+} else if (welcomeImageFallback) {
+    // Backward compatibility if older welcome markup is still present.
+    welcomeImageFallback.addEventListener('click', () => startFromWelcome('deluxe'));
+}
+
+classicAnswerInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        handleClassicAnswer();
+    }
+});
+
+backToChooserBtn.addEventListener('click', () => {
+    returnToChooser();
+});
 
 // Handle window resize
 window.addEventListener('resize', () => {
