@@ -26,6 +26,7 @@
             </select>
         </label><br>
         <button id="levelEditorBtn">Level Editor</button>
+        <button id="resetBtn">Reset Levels</button>
         <button id="startBtn">Start Game</button>
     </div>
 
@@ -41,16 +42,21 @@
             <label>Tool:
                 <select id="editorTool">
                     <option value="dot">Dot</option>
-                    <option value="line">Line (2 points)</option>
+                    <option value="line">Line (multi-point)</option>
                     <option value="curve">Curve (3+ points)</option>
+                    <option value="circle">Circle</option>
+                    <option value="erase">Erase</option>
                 </select>
             </label>
+            <button id="editorCommit" style="display:none;">Commit</button>
+                <button id="setStart1">Set Start P1</button>
+                <button id="setStart2">Set Start P2</button>
             <button id="editorClear">Clear</button>
             <button id="editorSave">Save Level</button>
             <button id="editorCancel">Cancel</button>
         </div>
         <canvas id="editorCanvas" style="border: 1px solid #000; display: block; margin: 10px auto;"></canvas>
-        <p id="editorHint">Click to place walls. Right-click or press ESC to cancel.</p>
+        <p id="editorHint">Select a tool or start button, then click on the grid to place walls or starting positions. Right-click or press ESC to cancel current action.</p>
     </div>
 
     <canvas id="gameCanvas" style="display:none;"></canvas>
