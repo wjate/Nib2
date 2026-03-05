@@ -116,9 +116,10 @@ body {
 
 #appShell {
     width: 100%;
-    height: 100%;
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 body.classic-edition {
@@ -374,13 +375,15 @@ select {
 }
 
 #info {
-    margin-top: 10px;
+    margin-top: 6px;
+    padding: 6px 12px;
     color: var(--ink);
     font-weight: 700;
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    border-top: 1px solid rgba(148, 163, 184, 0.45);
 }
 
 #endBtn {
@@ -399,6 +402,24 @@ select {
     border-radius: 8px;
 }
 
+#hudScoreboard {
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: rgba(2, 6, 23, 0.08);
+    color: var(--ink-soft);
+    font-weight: 700;
+    font-size: 0.88rem;
+}
+
+#clearScoresBtn {
+    padding: 5px 8px;
+    border: none;
+    background: #475569;
+    color: #fff;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
 #inGameHackBar {
     display: inline-flex;
     gap: 6px;
@@ -415,54 +436,22 @@ select {
     cursor: pointer;
 }
 
-#scoreboardPanel {
-    margin: 8px 16px 14px;
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 10px 12px;
-}
-
-.scoreboard-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-}
-
-.scoreboard-head h3 {
-    margin: 0;
-    font-size: 1rem;
-}
-
-#scoreboardList {
-    margin: 10px 0 0;
-    padding-left: 18px;
-    max-height: 190px;
-    overflow-y: auto;
-}
-
-#scoreboardList li {
-    margin-bottom: 6px;
-    color: var(--ink-soft);
-}
-
-body.classic-edition #scoreboardPanel {
-    background: rgba(1, 16, 9, 0.92);
-    border-color: #2f8f57;
-}
-
-body.classic-edition #scoreboardList li {
+body.classic-edition #hudScoreboard {
+    background: rgba(7, 48, 28, 0.6);
     color: #9cf7bc;
 }
 
-body.classic-edition.classic-color-edition #scoreboardPanel {
-    background: rgba(7, 14, 38, 0.94);
-    border-color: #4d67ff;
+body.classic-edition #clearScoresBtn {
+    background: #14532d;
 }
 
-body.classic-edition.classic-color-edition #scoreboardList li {
-    color: #c8d2ff;
+body.classic-edition.classic-color-edition #hudScoreboard {
+    background: rgba(30, 58, 138, 0.45);
+    color: #dbe6ff;
+}
+
+body.classic-edition.classic-color-edition #clearScoresBtn {
+    background: #1d4ed8;
 }
 
 #levelEditor {

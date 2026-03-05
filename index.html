@@ -95,6 +95,14 @@
                             <option value="4">4</option>
                         </select>
                     </label>
+                    <label id="aiIntelLabel">AI Intelligence
+                        <select id="aiIntelligence">
+                            <option value="easy">Easy</option>
+                            <option value="normal" selected>Normal</option>
+                            <option value="hard">Hard</option>
+                            <option value="insane">Insane</option>
+                        </select>
+                    </label>
                 </div>
                 <div id="onlinePanel" style="display:none;">
                     <p class="online-title">Online Multiplayer</p>
@@ -150,6 +158,8 @@
 
     <div id="info" style="display:none;">
         <span id="levelDisplay"></span> | <span id="scoreDisplay"></span> | <span id="livesDisplay"></span> <span id="pauseDisplay" style="display:none;">| PAUSED</span>
+        <span id="hudScoreboard"></span>
+        <button id="clearScoresBtn" type="button">Clear Scores</button>
         <button id="pauseBtn">Pause</button>
         <span id="inGameHackBar" style="display:none;">
             <button id="hackGodModeBtnGame" type="button">God</button>
@@ -158,14 +168,6 @@
             <button id="hackNextLevelBtnGame" type="button">Next Lvl</button>
         </span>
         <button id="endBtn">End Game</button>
-    </div>
-
-    <div id="scoreboardPanel">
-        <div class="scoreboard-head">
-            <h3>Scoreboard</h3>
-            <button id="clearScoresBtn" class="btn btn-secondary" type="button">Clear Scores</button>
-        </div>
-        <ul id="scoreboardList"></ul>
     </div>
 
     <!-- level editor overlay -->
