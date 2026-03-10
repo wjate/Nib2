@@ -92,6 +92,7 @@ function ensureGlobalLogDom() {
         drawer: el('globalLogDrawer'),
         list: el('globalLogList'),
         meta: el('globalLogMeta'),
+        copyBtn: el('globalLogCopyBtn'),
         clearBtn: el('globalLogClearBtn'),
         closeBtn: el('globalLogCloseBtn')
     };
@@ -189,6 +190,51 @@ function clearGlobalLog() {
     // Don't call logGood() here (it would re-add an entry right after clearing).
 }
 
+function buildGlobalLogText() {
+    const lines = [];
+    for (const e of globalLogState.entries) {
+        if (!e) continue;
+        const iso = new Date(e.t).toISOString();
+        const lvl = e.level === 'bad' ? 'BAD' : e.level === 'warn' ? 'WARN' : 'GOOD';
+        lines.push(`[${iso}] ${lvl} ${String(e.msg || '')}`);
+    }
+    return lines.join('\n');
+}
+
+async function copyGlobalLogToClipboard() {
+    const text = buildGlobalLogText();
+    if (!text) {
+        logWarn('Copy logs: nothing to copy.');
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(text);
+        logGood(`Copied ${globalLogState.entries.length} log entr${globalLogState.entries.length === 1 ? 'y' : 'ies'} to clipboard.`);
+        return;
+    } catch {
+        // Fallback for older browsers / non-secure contexts.
+    }
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', 'readonly');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        ta.style.top = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) {
+            logGood(`Copied ${globalLogState.entries.length} log entr${globalLogState.entries.length === 1 ? 'y' : 'ies'} to clipboard.`);
+        } else {
+            logBad('Copy logs failed.');
+        }
+    } catch (err) {
+        logBad('Copy logs failed:', err);
+    }
+}
+
 function initGlobalLoggerUi() {
     const dom = ensureGlobalLogDom();
     if (!dom.toggleBtn || !dom.drawer || !dom.list) return;
@@ -199,6 +245,9 @@ function initGlobalLoggerUi() {
     });
     dom.closeBtn?.addEventListener('click', closeGlobalLogDrawer);
     dom.clearBtn?.addEventListener('click', clearGlobalLog);
+    dom.copyBtn?.addEventListener('click', () => {
+        copyGlobalLogToClipboard();
+    });
     dom.bannerOpenBtn?.addEventListener('click', openGlobalLogDrawer);
 
     // Initial render + state.
@@ -396,6 +445,7 @@ const onlineMaxPlayersSelect = document.getElementById('onlineMaxPlayers');
 const deathResetAllToggle = document.getElementById('deathResetAllToggle');
 const hudScoreboard = document.getElementById('hudScoreboard');
 const clearScoresBtn = document.getElementById('clearScoresBtn');
+const scoreboardList = document.getElementById('scoreboardList');
 const adminCredentialPanel = document.getElementById('adminCredentialPanel');
 const newAdminUsernameInput = document.getElementById('newAdminUsername');
 const newAdminPasswordInput = document.getElementById('newAdminPassword');
@@ -510,6 +560,13 @@ function saveScoreboard() {
 }
 
 function renderScoreboard() {
+    // Scoreboard UI is optional; never allow it to crash the app.
+    if (hudScoreboard) {
+        const latest = scoreboardEntries && scoreboardEntries.length ? scoreboardEntries[0] : null;
+        hudScoreboard.textContent = latest ? `Last: ${latest.summary}` : '';
+    }
+    if (!scoreboardList) return;
+
     scoreboardList.innerHTML = '';
     if (!scoreboardEntries.length) {
         const li = document.createElement('li');

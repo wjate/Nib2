@@ -732,6 +732,10 @@ body.classic-edition.classic-color-edition #adminHackPanel {
     font-weight: 900;
 }
 
+.log-icon {
+    display: block;
+}
+
 #globalLogDrawer .log-list {
     padding: 10px 10px 18px;
     overflow: auto;
