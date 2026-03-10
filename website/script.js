@@ -6,6 +6,242 @@ const ctx = canvas.getContext('2d');
 // rendering and internal location, snake movement is now more fluid.
 const grid = 4;
 
+// ===== Persistent global logger (chronological, color-coded, non-blocking) =====
+const LOG_STORAGE_KEY = 'nibblesGlobalLogV1';
+const LOG_MAX_ENTRIES = 1200;
+
+function formatLogArg(arg) {
+    if (arg instanceof Error) {
+        const stack = arg.stack || '';
+        return stack ? `${arg.name}: ${arg.message}\n${stack}` : `${arg.name}: ${arg.message}`;
+    }
+    if (typeof arg === 'string') return arg;
+    try {
+        return JSON.stringify(arg);
+    } catch {
+        return String(arg);
+    }
+}
+
+function formatLogMessage(args) {
+    return args.map(formatLogArg).join(' ');
+}
+
+function loadPersistentLog() {
+    try {
+        const raw = localStorage.getItem(LOG_STORAGE_KEY);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+    } catch {
+        return [];
+    }
+}
+
+function savePersistentLog(entries) {
+    try {
+        localStorage.setItem(LOG_STORAGE_KEY, JSON.stringify(entries.slice(-LOG_MAX_ENTRIES)));
+    } catch {
+        // If storage is full or blocked, keep runtime logging working.
+    }
+}
+
+const globalLogState = {
+    entries: loadPersistentLog(),
+    hasFailure: false
+};
+globalLogState.hasFailure = globalLogState.entries.some((e) => e && e.level === 'bad');
+
+function logAdd(level, message, meta) {
+    const entry = {
+        t: Date.now(),
+        level: level === 'bad' ? 'bad' : level === 'warn' ? 'warn' : 'good',
+        msg: String(message || ''),
+        meta: meta && typeof meta === 'object' ? meta : null
+    };
+    globalLogState.entries.push(entry);
+    if (globalLogState.entries.length > LOG_MAX_ENTRIES) {
+        globalLogState.entries.splice(0, globalLogState.entries.length - LOG_MAX_ENTRIES);
+    }
+    if (entry.level === 'bad') globalLogState.hasFailure = true;
+    savePersistentLog(globalLogState.entries);
+    renderGlobalLogUi(entry);
+    updateGlobalFailureUi();
+}
+
+function logGood(...args) {
+    logAdd('good', formatLogMessage(args));
+}
+function logWarn(...args) {
+    logAdd('warn', formatLogMessage(args));
+}
+function logBad(...args) {
+    logAdd('bad', formatLogMessage(args));
+}
+
+function el(id) {
+    return document.getElementById(id);
+}
+
+function ensureGlobalLogDom() {
+    return {
+        banner: el('globalFailureBanner'),
+        bannerText: el('globalFailureText'),
+        bannerOpenBtn: el('globalFailureOpenBtn'),
+        toggleBtn: el('globalLogToggleBtn'),
+        drawer: el('globalLogDrawer'),
+        list: el('globalLogList'),
+        meta: el('globalLogMeta'),
+        clearBtn: el('globalLogClearBtn'),
+        closeBtn: el('globalLogCloseBtn')
+    };
+}
+
+function formatTimeShort(ts) {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+}
+
+function renderLogEntryNode(entry) {
+    const row = document.createElement('div');
+    row.className = `log-entry ${entry.level}`;
+
+    const time = document.createElement('div');
+    time.className = 'log-time';
+    time.textContent = formatTimeShort(entry.t);
+
+    const lvl = document.createElement('div');
+    lvl.className = 'log-level';
+    lvl.textContent = entry.level === 'bad' ? 'BAD' : entry.level === 'warn' ? 'WARN' : 'GOOD';
+
+    const msg = document.createElement('div');
+    msg.className = 'log-msg';
+    msg.textContent = entry.msg;
+
+    row.appendChild(time);
+    row.appendChild(lvl);
+    row.appendChild(msg);
+    return row;
+}
+
+function renderGlobalLogUi(addedEntry) {
+    const dom = ensureGlobalLogDom();
+    if (!dom.list || !dom.meta) return;
+
+    dom.meta.textContent = `${globalLogState.entries.length} entr${globalLogState.entries.length === 1 ? 'y' : 'ies'}`;
+
+    // Initial render: build the list once.
+    if (!dom.list.dataset.rendered) {
+        dom.list.textContent = '';
+        globalLogState.entries.forEach((e) => dom.list.appendChild(renderLogEntryNode(e)));
+        dom.list.dataset.rendered = '1';
+        return;
+    }
+
+    // Incremental render.
+    if (addedEntry) {
+        dom.list.appendChild(renderLogEntryNode(addedEntry));
+        // If user is at/near bottom, keep it pinned to bottom.
+        const nearBottom = dom.list.scrollHeight - dom.list.scrollTop - dom.list.clientHeight < 120;
+        if (nearBottom) dom.list.scrollTop = dom.list.scrollHeight;
+    }
+}
+
+function updateGlobalFailureUi() {
+    const dom = ensureGlobalLogDom();
+    if (!dom.toggleBtn || !dom.banner) return;
+
+    dom.toggleBtn.classList.toggle('has-errors', globalLogState.hasFailure);
+    dom.banner.style.display = globalLogState.hasFailure ? 'flex' : 'none';
+}
+
+function openGlobalLogDrawer() {
+    const dom = ensureGlobalLogDom();
+    if (!dom.drawer) return;
+    dom.drawer.style.display = 'flex';
+    renderGlobalLogUi();
+    // Best effort: focus the close button so keyboard users can exit.
+    dom.closeBtn?.focus?.();
+    logGood('Opened log drawer.');
+}
+
+function closeGlobalLogDrawer() {
+    const dom = ensureGlobalLogDom();
+    if (!dom.drawer) return;
+    dom.drawer.style.display = 'none';
+}
+
+function clearGlobalLog() {
+    globalLogState.entries = [];
+    globalLogState.hasFailure = false;
+    savePersistentLog(globalLogState.entries);
+
+    const dom = ensureGlobalLogDom();
+    if (dom.list) {
+        dom.list.textContent = '';
+        dom.list.dataset.rendered = '1';
+    }
+    if (dom.meta) dom.meta.textContent = '0 entries';
+    updateGlobalFailureUi();
+    // Don't call logGood() here (it would re-add an entry right after clearing).
+}
+
+function initGlobalLoggerUi() {
+    const dom = ensureGlobalLogDom();
+    if (!dom.toggleBtn || !dom.drawer || !dom.list) return;
+
+    dom.toggleBtn.addEventListener('click', () => {
+        if (dom.drawer.style.display === 'none' || !dom.drawer.style.display) openGlobalLogDrawer();
+        else closeGlobalLogDrawer();
+    });
+    dom.closeBtn?.addEventListener('click', closeGlobalLogDrawer);
+    dom.clearBtn?.addEventListener('click', clearGlobalLog);
+    dom.bannerOpenBtn?.addEventListener('click', openGlobalLogDrawer);
+
+    // Initial render + state.
+    renderGlobalLogUi();
+    updateGlobalFailureUi();
+}
+
+function installGlobalLogHooks() {
+    // Capture console output chronologically, without breaking existing behavior.
+    const original = {
+        log: console.log.bind(console),
+        warn: console.warn.bind(console),
+        error: console.error.bind(console)
+    };
+    console.log = (...args) => {
+        try { logGood(...args); } catch {}
+        original.log(...args);
+    };
+    console.warn = (...args) => {
+        try { logWarn(...args); } catch {}
+        original.warn(...args);
+    };
+    console.error = (...args) => {
+        try { logBad(...args); } catch {}
+        original.error(...args);
+    };
+
+    window.addEventListener('error', (ev) => {
+        try {
+            const msg = ev?.error ? formatLogArg(ev.error) : String(ev?.message || 'Unknown error');
+            logBad(msg);
+        } catch {}
+    });
+    window.addEventListener('unhandledrejection', (ev) => {
+        try {
+            const reason = ev?.reason;
+            logBad('Unhandled rejection:', reason instanceof Error ? reason : formatLogArg(reason));
+        } catch {}
+    });
+
+    logGood('Logger initialized.');
+}
+
 // fixed playing field dimensions in dots
 const LOCAL_COLUMNS = 100;
 const LOCAL_ROWS = 50;
@@ -55,6 +291,10 @@ function updateCanvasMetrics() {
 }
 
 updateCanvasMetrics();
+
+// Init global logging UI/hooks as early as possible.
+initGlobalLoggerUi();
+installGlobalLogHooks();
 
 let players = [];
 let currentNumber = 1;
@@ -2311,6 +2551,7 @@ welcomeScreen.style.display = 'flex';
 appShell.style.display = 'none';
 
 function startFromWelcome(edition) {
+    logGood('Welcome selection:', edition);
     gameEdition = edition;
     const classic = edition === 'classic';
     document.body.classList.toggle('classic-edition', classic);
@@ -2335,6 +2576,10 @@ function startFromWelcome(edition) {
         updateCanvasMetrics();
     }
 }
+
+// Allow a simple inline HTML fallback handler to start the app, and make
+// debugging obvious if script initialization fails.
+window.NIBBLES_START = startFromWelcome;
 
 if (startDeluxeBtn && startClassicBtn) {
     startDeluxeBtn.addEventListener('click', () => startFromWelcome('deluxe'));

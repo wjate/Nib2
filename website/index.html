@@ -13,14 +13,24 @@
             <h1>Choose Your Nibbles</h1>
             <p>Select one version to start.</p>
             <div class="welcome-options">
-                <button id="startDeluxeBtn" class="welcome-option" type="button">
+                <button
+                    id="startDeluxeBtn"
+                    class="welcome-option"
+                    type="button"
+                    onclick="window.NIBBLES_START ? window.NIBBLES_START('deluxe') : alert('Nibbles failed to load: script.js missing or crashed. Open DevTools Console/Network for errors.')"
+                >
                     <img
                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='320' viewBox='0 0 560 320'%3E%3Crect width='560' height='320' fill='%23dbeafe'/%3E%3Crect x='12' y='12' width='536' height='296' fill='%23bfdbfe' stroke='%233b82f6' stroke-width='4'/%3E%3Ctext x='280' y='132' text-anchor='middle' font-size='40' font-family='Arial' fill='%230f172a'%3ENibbles Deluxe%3C/text%3E%3Ctext x='280' y='182' text-anchor='middle' font-size='20' font-family='Arial' fill='%23334155'%3EReplace image later%3C/text%3E%3C/svg%3E"
                         alt="Nibbles Deluxe start image placeholder"
                     >
                     <span>Nibbles Deluxe</span>
                 </button>
-                <button id="startClassicBtn" class="welcome-option" type="button">
+                <button
+                    id="startClassicBtn"
+                    class="welcome-option"
+                    type="button"
+                    onclick="window.NIBBLES_START ? window.NIBBLES_START('classic') : alert('Nibbles failed to load: script.js missing or crashed. Open DevTools Console/Network for errors.')"
+                >
                     <img
                         src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='560' height='320' viewBox='0 0 560 320'%3E%3Crect width='560' height='320' fill='%23000000'/%3E%3Crect x='12' y='12' width='536' height='296' fill='%23050505' stroke='%23aaaaaa' stroke-width='3'/%3E%3Ctext x='280' y='132' text-anchor='middle' font-size='40' font-family='Courier New' fill='%23ffffff'%3ENibbles Classic%3C/text%3E%3Ctext x='280' y='182' text-anchor='middle' font-size='20' font-family='Courier New' fill='%23dddddd'%3EOriginal Recreation%3C/text%3E%3C/svg%3E"
                         alt="Nibbles Classic start image placeholder"
@@ -207,6 +217,28 @@
     </div>
 
     <canvas id="gameCanvas" style="display:none;"></canvas>
+
+    <!-- Global logging UI (always available, does not interrupt gameplay) -->
+    <div id="globalFailureBanner" role="status" aria-live="polite" style="display:none;">
+        <span id="globalFailureText">Something failed. Open Logs for details.</span>
+        <button id="globalFailureOpenBtn" type="button">Open Logs</button>
+    </div>
+    <button id="globalLogToggleBtn" type="button" aria-haspopup="dialog" aria-controls="globalLogDrawer">
+        Logs
+    </button>
+    <div id="globalLogDrawer" role="dialog" aria-modal="false" aria-label="Nibbles logs" style="display:none;">
+        <div class="log-header">
+            <div class="log-title">
+                <strong>Logs</strong>
+                <span id="globalLogMeta"></span>
+            </div>
+            <div class="log-actions">
+                <button id="globalLogClearBtn" type="button">Clear</button>
+                <button id="globalLogCloseBtn" type="button">Close</button>
+            </div>
+        </div>
+        <div id="globalLogList" class="log-list" aria-label="Log entries"></div>
+    </div>
     <script src="script.js"></script>
 </body>
 </html>

@@ -9,6 +9,9 @@
     --ink-soft: #334155;
     --paper: #ffffff;
     --line: #cbd5e1;
+    --log-good: #16a34a;
+    --log-warn: #f97316;
+    --log-bad: #dc2626;
 }
 
 * {
@@ -624,5 +627,171 @@ body.classic-edition.classic-color-edition #adminHackPanel {
 
     .welcome-options {
         grid-template-columns: 1fr;
+    }
+}
+
+/* ===== Global log UI (always visible) ===== */
+#globalLogToggleBtn {
+    position: fixed;
+    right: 14px;
+    bottom: 14px;
+    z-index: 5000;
+    border: 1px solid rgba(2, 6, 23, 0.25);
+    border-radius: 999px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.94);
+    color: var(--ink);
+    box-shadow: 0 14px 34px rgba(15, 23, 42, 0.25);
+    font-weight: 900;
+    letter-spacing: 0.2px;
+}
+
+#globalLogToggleBtn.has-errors {
+    border-color: rgba(220, 38, 38, 0.7);
+    box-shadow: 0 18px 46px rgba(220, 38, 38, 0.22);
+}
+
+#globalFailureBanner {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    top: 10px;
+    z-index: 5100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(220, 38, 38, 0.55);
+    background: rgba(254, 226, 226, 0.96);
+    color: #7f1d1d;
+    box-shadow: 0 14px 34px rgba(127, 29, 29, 0.22);
+    font-weight: 800;
+}
+
+#globalFailureBanner button {
+    border: 1px solid rgba(127, 29, 29, 0.25);
+    border-radius: 999px;
+    padding: 7px 10px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.95);
+    color: #7f1d1d;
+    font-weight: 900;
+}
+
+#globalLogDrawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    width: min(520px, 96vw);
+    z-index: 5200;
+    background: rgba(255, 255, 255, 0.98);
+    border-left: 1px solid rgba(2, 6, 23, 0.15);
+    box-shadow: -22px 0 64px rgba(2, 6, 23, 0.25);
+    display: flex;
+    flex-direction: column;
+}
+
+#globalLogDrawer .log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 12px;
+    border-bottom: 1px solid rgba(2, 6, 23, 0.12);
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.14), rgba(6, 182, 212, 0.1));
+}
+
+#globalLogDrawer .log-title {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#globalLogMeta {
+    color: var(--ink-soft);
+    font-weight: 800;
+    font-size: 0.84rem;
+}
+
+#globalLogDrawer .log-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+#globalLogDrawer .log-actions button {
+    border: 1px solid rgba(2, 6, 23, 0.18);
+    border-radius: 999px;
+    padding: 7px 10px;
+    cursor: pointer;
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--ink);
+    font-weight: 900;
+}
+
+#globalLogDrawer .log-list {
+    padding: 10px 10px 18px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.log-entry {
+    display: grid;
+    grid-template-columns: 102px 74px 1fr;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid rgba(2, 6, 23, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.9);
+    margin-bottom: 8px;
+}
+
+.log-entry .log-time {
+    color: rgba(51, 65, 85, 0.95);
+    font-weight: 900;
+}
+
+.log-entry .log-level {
+    font-weight: 1000;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+}
+
+.log-entry .log-msg {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: rgba(15, 23, 42, 0.92);
+}
+
+.log-entry.good {
+    border-color: rgba(22, 163, 74, 0.22);
+}
+.log-entry.good .log-level {
+    color: var(--log-good);
+}
+
+.log-entry.warn {
+    border-color: rgba(249, 115, 22, 0.22);
+}
+.log-entry.warn .log-level {
+    color: var(--log-warn);
+}
+
+.log-entry.bad {
+    border-color: rgba(220, 38, 38, 0.22);
+    background: rgba(254, 242, 242, 0.88);
+}
+.log-entry.bad .log-level {
+    color: var(--log-bad);
+}
+
+@media (max-width: 820px) {
+    .log-entry {
+        grid-template-columns: 92px 64px 1fr;
     }
 }
